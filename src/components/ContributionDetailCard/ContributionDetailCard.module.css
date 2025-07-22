@@ -1,0 +1,38 @@
+.cardDetailAvatarContribution {
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+  width: 40px;   /* Sama dengan size Avatar */
+  height: 40px;
+  border-radius: 50%; /* Membuat Card bulat */
+  display: flex; 
+  align-items: center;
+  padding-top: 1rem;
+  justify-content: center;
+  overflow: hidden; /* Jaga-jaga kalau konten melebihi bounding box */
+}
+
+
+.cardDetailAvatarImg {
+  width: 50%;
+  height: auto;
+  object-fit: cover; /* Jika perlu memotong agar rapi */
+  display: block;    /* Hindari spasi di bawah inline element */
+}
+
+.actionIconDetail{
+    font-size: 1.5rem !important;
+    transition: all 0.3s !important;
+}
+
+.actionIconDetail:hover{
+    color:#772d2f !important;
+    font-size: 1.6rem !important;
+}
+
+.checkboxWrapper {
+  position: absolute;
+  top: 12px;
+  right: -310px;
+  z-index: 10;
+}
+
+

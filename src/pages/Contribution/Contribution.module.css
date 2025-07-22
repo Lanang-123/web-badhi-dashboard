@@ -1,0 +1,155 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+
+* {
+  font-family: "Poppins", serif;
+}
+
+.contributionContainer {
+  background-color: #fff;
+  padding: 55px 42px;
+}
+
+/* Title */
+.sectionTitle {
+  font-size: 2rem;
+  font-weight: bold !important;
+  margin: 0;
+}
+
+.sectionSubtitle {
+  font-size: 1rem;
+  color: #c7c7c7 !important;
+  margin-top: -7px !important;
+  font-weight: 400 !important;
+}
+
+/* Section Chart */
+.sectionChart {
+  display: grid;
+  gap: 3rem;
+  margin-top: 24px;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* 
+  Agar layout chart lebih responsive di tablet & mobile:
+  - max-width: 992px (tablet) -> 2 kolom
+  - max-width: 576px (mobile) -> 1 kolom
+*/
+@media (max-width: 992px) {
+  .sectionChart {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 576px) {
+  .sectionChart {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cardChart {
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Table */
+.cardTable {
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Tombol Category (Opsional jika Anda gunakan) */
+.buttonTableCategoryActive {
+  background-color: #772d2f !important;
+  color: white;
+  width: 150px;
+}
+.buttonTableCategoryActive:hover {
+  border: 1px solid #cacaca !important;
+  color: #afafaf !important;
+}
+.buttonTableCategoryDefault {
+  width: 150px;
+}
+.buttonTableCategoryDefault:hover {
+  border: 1px solid #cacaca !important;
+  color: #afafaf !important;
+}
+
+/* Icon detail */
+.titleDetailTemple {
+  color: #772d2f !important;
+}
+
+/* Card Detail */
+.sectionCardDetail {
+  margin-top: 24px;
+}
+
+.cardDetailContribution {
+  width: 100%;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+.cardDetailContribution img {
+  width: 100%;
+  height: auto;
+  object-fit: cover; /* Jika perlu memotong agar rapi */
+  display: block;    /* Hindari spasi di bawah inline element */
+}
+
+/* Info Container */
+.informationContainer {
+  background-color: #fff;
+  padding: 55px 42px;
+  font-family: 'Poppins', sans-serif;
+}
+
+.cardDetailAvatarInformation {
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+  width: 40px;   /* Sama dengan size Avatar */
+  height: 40px;
+  border-radius: 50%; /* Membuat Card bulat */
+  display: flex; 
+  align-items: center;
+  padding-top: 1rem;
+  justify-content: center;
+  overflow: hidden; /* Jaga-jaga kalau konten melebihi bounding box */
+}
+
+/* Tombol Kategori */
+.buttonCategoryDetailActive {
+  background-color: #772d2f !important;
+  color: white !important;
+  border: none !important;
+}
+.buttonCategoryDetailActive:hover {
+  background-color: #5a1f21 !important;
+}
+
+.buttonCategoryDetailDefault {
+  background-color: #fff !important;
+  color: #772d2f !important;
+  border: 1px solid #772d2f !important;
+}
+.buttonCategoryDetailDefault:hover {
+  color: #5a1f21 !important;
+  border-color: #5a1f21 !important;
+}
+
+
+/* Card Detail Section */
+.sectionCardDetail {
+  margin-top: 24px;
+}
+
+/* Custom Search (opsional) */
+.customSearch .ant-input {
+  font-size: 18px;
+}
+
+/* Responsiveness tambahan (opsional) */
+@media (max-width: 768px) {
+  .contributionContainer {
+    padding: 24px;
+  }
+}

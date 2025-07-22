@@ -1,0 +1,174 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+
+*{
+  font-family: "Poppins", serif !important;
+}
+
+.sidebar {
+    position: sticky;
+    top: 0;
+    left: 0;
+    width: 400px !important;
+    height: 100vh;
+    background-color: #fff;
+    border-right: 1px solid #ddd;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+  }
+  
+  .logoContainer {
+    text-align: center;
+    padding-top: 24px;
+    margin-bottom: 0;
+  }
+  
+  .logoImg {
+    width: 100px;
+    height: auto;
+    margin-bottom: 100px;
+    margin-top: -10px;
+  }
+  
+  .menuContainer {
+    flex: 1;
+    width: 97%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-y: auto;
+    overflow-x: hidden;
+    margin-top: -90px;
+    border-right: 1px solid #ddd !important;
+  }
+  
+  .menuItem {
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: transparent !important;
+    margin: 0 22px 0 17px !important;
+    padding: 60px 0 !important;
+    height: auto;
+    
+  }
+  
+  .iconCircle {
+    width: 60px;
+    height: 50px;
+    background-color: transparent;
+    color: #772d2f;
+    border-radius: 12%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s;
+    font-size: 50px;
+    margin-left: 12px;
+  }
+
+  .iconCircleRT {
+    width: 60px;
+    height: 50px;
+    background-color: transparent;
+    color: #772d2f;
+    border-radius: 12%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s;
+    font-size: 50px;
+    margin-left: 28px;
+  }
+  
+  .menuText {
+    margin-top: 4px;
+    font-size: 14px;
+    transition: color 0.3s;
+    text-align: center;
+    font-weight: 600;
+  }
+  
+  /* Override background pada item aktif dan saat hover */
+  .ant-menu-item-selected {
+    background-color: transparent !important;
+    border-right: none !important;
+  }
+  
+  .ant-menu-item:hover {
+    background-color: transparent !important;
+  }
+  
+  /* Efek pada icon dan teks ketika item diaktifkan/hover */
+  .menuItem:active .iconCircle,
+  .menuItem.ant-menu-item-selected .iconCircle,
+  .menuItem:hover .iconCircle {
+    background-color: #772d2f;
+    color: #fff;
+    padding: 12px;
+  }
+  
+  .menuItem:active .menuText,
+  .menuItem.ant-menu-item-selected .menuText,
+  .menuItem:hover .menuText {
+    color: #772d2f;
+  }
+  
+
+  /* ‒‒‒ User Section ‒‒‒ */
+.userSection {
+  position: absolute;
+  bottom: 20px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 8px;
+}
+
+.userSection .ant-avatar {
+  margin-bottom: 8px;
+}
+
+.userInfo {
+  text-align: center;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.userInfo .ant-typography {
+  display: block;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Nama (bold) */
+.userInfo strong {
+  font-size: 14px;
+}
+
+/* Role (secondary) */
+.userInfo .ant-typography[type="secondary"] {
+  font-size: 11px;
+}
+
+/* Logout Button */
+.logoutButton {
+  width: 60%;
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: white;
+  background-color: #772d2f;
+}
+
+.logoutButton:hover {
+  background-color: #772d2f;
+}
