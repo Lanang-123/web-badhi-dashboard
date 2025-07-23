@@ -13,6 +13,15 @@
 .gm-group-item { padding: 4px 8px; margin: 4px 0; background: #1f1f1f; border-radius: 4px; }
 .gm-assign-btn { margin-top: 12px; background: #772d2f; border: none; color: #fff; }
 
+/* Tambahkan di file CSS */
+/* In GroupManagement.module.css */
+/* Tambahkan di akhir file */
+.groupCard[data-drag-over] {
+  border: 2px dashed #1890ff;
+  background-color: #e6f7ff;
+  transition: all 0.3s;
+}
+
 /* GroupManagement.module.css */
 .scrollable-container {
   max-height: 100%;

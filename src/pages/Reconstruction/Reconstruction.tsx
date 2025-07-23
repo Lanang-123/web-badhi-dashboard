@@ -14,22 +14,18 @@ import {
   Input,
   Spin,
   Checkbox,
-  Row,
-  Col,
   message,
   Select,
+  DatePicker
 } from 'antd';
 import {
-  FolderOutlined,
-  TeamOutlined,
+  CloudDownloadOutlined,
   DeleteOutlined,
   DeploymentUnitOutlined,
-  PlusOutlined,
-  CheckOutlined,
   GroupOutlined,
   DeliveredProcedureOutlined
 } from '@ant-design/icons';
-import useReconstructionStore from '../../store/useReconstructionStore';
+import useReconstructionStore, { ReconstructionMetadata } from '../../store/useReconstructionStore';
 import useTempleStore from '../../store/useTempleStore';
 import useContributionStore, { Contribution } from '../../store/useContributionStore';
 import useAuthStore from '../../store/useAuthStore';
@@ -37,7 +33,8 @@ import styles from './Reconstruction.module.css';
 import GroupManagement from './GroupManagement';
 import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
-import Settings,{ConfigItem} from '../Settings/Settings';
+import moment, { Moment } from 'moment';
+import dayjs, { Dayjs } from 'dayjs';
 
 interface ReconstructionProps {
   reconstructionId: string;
@@ -53,19 +50,18 @@ export type Level = 'nista' | 'madya' | 'utama' | 'other' | 'all';
 const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => {
     // Configuration state
   const [selectedKey, setSelectedKey] = useState<string | undefined>(undefined);
-  const [resolution, setResolution] = useState<string>('');
-  // State baru untuk menyimpan gabungan kontribusi
-  const [fetchedContributions, setFetchedContributions] = useState<Contribution[]>([]);
+ 
 
  
- 
+   const [filterDate, setFilterDate] = useState<Dayjs | null>(dayjs());
   const reconStore = useReconstructionStore();
+  const [selectedRecons, setSelectedRecons] = useState<string[]>([]);
    
    
-  // Load global configs
   // Load global configs
   const configs = useReconstructionStore(state => state.configs);
   const setReconstructionConfig = useReconstructionStore(state => state.setReconstructionConfig);
+
  
 
  
@@ -115,7 +111,71 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
   const navigate = useNavigate();
 
   const targetReconstructionId = activeTab === '1' ? reconstructionId : activeReconstruction;
-  const rec = useReconstructionStore(state =>
+ 
+
+ const apiUrl = import.meta.env.VITE_API_URL as string;
+ const apiRecons = import.meta.env.VITE_API_RECONSTRUCTION_URL;
+
+ const dteParam = filterDate?.format('YYYYMMDD') ?? '';
+
+useEffect(() => {
+  const fetchRecons = async () => {
+    if (!filterDate) {
+      reconStore.setReconstructions([]);
+      return;
+    }
+    const dateParam = filterDate.format('YYYYMMDD');
+
+    try {
+      const res = await fetch(`${apiRecons}?date=${dateParam}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const payload = await res.json() as {
+        error?: string;
+        datas?: ReconstructionMetadata[];
+      };
+      console.log('payload:', payload);
+
+      // 1) Tangani error dari server
+      if (payload.error) {
+        message.error(payload.error);
+        reconStore.setReconstructions([]);
+        return;
+      }
+
+      // 2) Pakai array kosong kalau datas tidak ada
+      const datas = payload.datas ?? [];
+
+      // 3) Mapping dengan default untuk groups & contributions
+      const mappedData = datas.map(rec => ({
+        ...rec,
+        contributions: rec.contributions ?? [],
+        groups: (rec.groups ?? []).map(group => ({
+          ...group,
+          contributions: (group.contributions ?? []).map(contrib => ({
+            ...contrib,
+            category: contrib.category ?? 'other',
+            temple_id: contrib.temple_id ?? 0,
+            privacy_setting: contrib.privacy_setting ?? 'public'
+          }))
+        }))
+      }));
+
+      reconStore.setReconstructions(mappedData);
+    } catch (err) {
+      console.error('Failed to fetch reconstructions:', err);
+      message.error('Failed to load reconstructions for date');
+      reconStore.setReconstructions([]);
+    }
+  };
+
+  fetchRecons();
+}, [filterDate]);
+
+
+
+ const rec = useReconstructionStore(state =>
     state.reconstructions.find(r => r.reconstruction_id === targetReconstructionId)
   );
 
@@ -127,28 +187,154 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
   }
 }, [activeTab, rec, configs]); // Tambahkan configs sebagai dependency
 
- const apiUrl = import.meta.env.VITE_API_URL as string;
+   const handleConfigSubmit = async () => {
+      if (!rec) {
+        message.error('Reconstruction tidak ditemukan');
+        return;
+      }
+      if (!selectedKey) {
+        message.warning('Silakan pilih konfigurasi');
+        return;
+      }
+      
+      const config = configs.find(c => c.key === selectedKey)!;
+      setReconstructionConfig(rec.reconstruction_id, config);
 
-   const handleConfigSubmit = () => {
-    if (!rec) {
-      message.error('Reconstruction tidak ditemukan');
-      return;
+      try {
+        // Panggil fungsi POST
+        await reconStore.postReconstructionForAPI(rec.reconstruction_id);
+       
+        
+        Swal.fire({
+          title: 'Success!',
+          text: 'Reconstruction saved successfully!',
+          icon: 'success',
+          timer: 1500,
+          showConfirmButton: false
+        });
+        
+        // Navigasi kembali jika perlu
+        navigate('/reconstructions');
+      } catch (error) {
+        console.log(error);
+        
+        Swal.fire({
+          title: 'Error!',
+          text: 'Failed to save reconstruction',
+          icon: 'error',
+          timer: 1500,
+          showConfirmButton: false
+        });
+      }
+    };
+
+  
+    // Fungsi untuk unduh satu reconstruction
+    const handleDownload = async (rec: any) => {
+      const dateParam = filterDate?.format('YYYYMMDD');
+
+      try {
+        const res = await fetch(`${apiRecons}/download/${rec.reconstruction_id}?date=${dateParam}`);
+        const data = await res.json();
+        
+        // Buat file download
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `reconstruction_${rec.reconstruction_id}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('Download failed:', err);
+        message.error('Failed to download reconstruction');
+      }
+    };
+
+  // Fungsi untuk unduh semua berdasarkan tanggal
+  const handleDownloadAllByDate = async () => {
+    if (!filterDate) return;
+    
+    try {
+      const dateParam = filterDate.format('YYYYMMDD');
+      const res = await fetch(`${apiRecons}/download?date=${dateParam}`);
+      const data = await res.json();
+      
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `reconstructions_${dateParam}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download failed:', err);
+      message.error('Failed to download reconstructions');
     }
-    if (!selectedKey) {
-      message.warning('Silakan pilih konfigurasi');
-      return;
-    }
-    const config = configs.find(c => c.key === selectedKey)!;
-    setReconstructionConfig(rec.reconstruction_id, config);
-     Swal.fire({
-      title: 'Created!',
-      text: `Configuration Created !`,
-      icon: 'success',
-      timer: 1500,
-      showConfirmButton: false
-    });
   };
 
+   // Handle batch download of selected
+  const handleDownloadSelected = async () => {
+  const dateParam = filterDate?.format('YYYYMMDD');
+  if (!filterDate || selectedRecons.length === 0) return;
+    console.log(selectedRecons);
+    
+  try {
+    // 1) Kirim POST dengan JSON body { ids: [...] }
+    const res = await fetch(
+      `${apiRecons}/download/multiple?date=${dateParam}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedRecons }),
+      }
+    );
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Failed to fetch selected data');
+    }
+
+    // 2) Ambil response (diasumsikan sudah array ReconstructionMetadata[])
+    const data: ReconstructionMetadata[] = await res.json();
+    console.log('Downloaded selected:', data);
+
+    // 3) Buat dan trigger download
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `selected_reconstructions_${dateParam}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err: any) {
+    console.error('Download failed:', err);
+    message.error(err.message || 'Failed to download selected reconstructions');
+  }
+};
+
+
+
+  
+
+
+  const toggleSelectRecon = (id: string) => {
+    setSelectedRecons(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  
+
+  const reconstructionsToShow = reconStore.reconstructions;
   // Debounce untuk pencarian temple
   useEffect(() => {
     if (searchTimeout) {
@@ -324,35 +510,7 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
     };
   }, [handleAddContribObserver]);
 
-  // Filter contributions
-  const filtered = contribStore.contributions.filter(c =>
-    c.name.toLowerCase().includes(searchText.toLowerCase())
-  );
-
-  const addContribFiltered = contribStore.contributions.filter(c =>
-    c.name.toLowerCase().includes(addContribSearchText.toLowerCase())
-  );
-
-  // DIUBAH: Toggle pemilihan temple
-  const toggleTempleSelect = (id: number) => {
-    setSelectedTempleIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
-  };
-
-
-  // Toggle selection
-  const toggleSelect = (id: number) => {
-    setSelectedContribIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
-  };
-
-  const toggleAddContribSelect = (id: number) => {
-    setAddContribSelectedIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
-  };
+  
 
   // Save Reconstruction
   // Ubah handleSave untuk membuat SATU reconstruction
@@ -444,7 +602,7 @@ const handleSave = async () => {
     // const filtered = allContributions.filter(c =>
     //   selectedContribIds.includes(c.tx_contribution_id)
     // );
-
+    
 
     
 
@@ -593,7 +751,10 @@ const handleSave = async () => {
   };
 
 
-
+  const totalContribs = rec?.groups.reduce(
+      (sum, g) => sum + g.contributions.length,
+      0
+    );
 
 
   // Close all modals
@@ -615,6 +776,7 @@ const handleSave = async () => {
   return (
     <>
       <div className={styles.reconstructionContainer}>
+        <Title level={3} style={{ margin: 0 }}>Reconstruction</Title>
         <Tabs
           activeKey={activeTab}
           onChange={key => setActiveTab(key as '1' | 'grouping' | 'configuration')}
@@ -622,119 +784,153 @@ const handleSave = async () => {
         >
           {/* Tab 1: Reconstructions List */}
           <TabPane tab="Reconstructions" key="1">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-              <Title level={3} style={{ margin: 0 }}>Reconstructions</Title>
-              <Button
-                type="primary"
-                icon={<DeliveredProcedureOutlined />}
-                onClick={() => setCreateModalVisible(true)}
-                style={{ backgroundColor:"#772d2f" }}
-              >
-                Add Reconstruction
-              </Button>
-            </div>
-            
-            {reconStore.reconstructions.length === 0 ? (
-              <Empty
-                description="No reconstructions created yet"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-              >
-                <Button type="primary" onClick={() => setCreateModalVisible(true)}>
-                  Create First Reconstruction
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                {/* <Button onClick={() => setFilterDate(moment())}>Today</Button> */}
+                <Text style={{ marginTop: '4px' }}>Date :</Text>
+                <DatePicker value={filterDate} onChange={setFilterDate} allowClear />
+               {reconstructionsToShow.length === 0 ? (
+                  <Button
+                    type="default"
+                    icon={<CloudDownloadOutlined />}
+                    onClick={handleDownloadAllByDate}
+                    disabled={true}
+                    style={{ marginLeft: 8 }}
+                  >
+                    Download JSON All
+                  </Button>
+                ) : (
+                  <Button
+                    type="default"
+                    icon={<CloudDownloadOutlined />}
+                    onClick={handleDownloadAllByDate}
+                    disabled={!filterDate}
+                    style={{ marginLeft: 8 }}
+                  >
+                    Download JSON All
+                  </Button>
+                )}
+
+                <Button onClick={handleDownloadSelected} disabled={selectedRecons.length === 0}>
+                  Download JSON Selected ({selectedRecons.length})
                 </Button>
-              </Empty>
-            ) : (
-              <List
+                  <Button
+                    type="primary"
+                    icon={<DeliveredProcedureOutlined />}
+                    onClick={() => setCreateModalVisible(true)}
+                    style={{ backgroundColor:"#772d2f",marginLeft:'24rem' }}
+                  >
+                    Add Reconstruction
+                  </Button>
+              </div>
+
+              {reconstructionsToShow.length > 0 ? (
+                <List
                 itemLayout="horizontal"
-                dataSource={reconStore.reconstructions}
+                dataSource={reconstructionsToShow}
                 pagination={{ pageSize: 5, showSizeChanger: false }}
                 style={{ border: '1px solid #f0f0f0', borderRadius: 4 }}
-                renderItem={rec => (
-                  <List.Item
-                    key={rec.reconstruction_id}
-                    style={{ borderBottom: '1px solid #f0f0f0', padding: '16px' }}
-                    actions={[
-                      // <Button
-                      //   key="add"
-                      //   type="default"
-                      //   icon={<PlusOutlined />}
-                      //   onClick={() => openAddContribModal(rec.reconstruction_id)}
-                      
-                      // >
-                      //   Add Contributions
-                      // </Button>,
-                      <Button
-                        key="group"
-                        type="dashed"
-                        icon={<GroupOutlined />}
-                        onClick={() => {
-                          setActiveReconstruction(rec.reconstruction_id);
-                          setActiveTab('grouping');
-                        }}
-                      >
-                        Group
-                      </Button>,
-                      <Popconfirm
-                        key="delete"
-                        title="Yakin mau hapus?"
-                        onConfirm={() => reconStore.removeReconstruction(rec.reconstruction_id)}
-                        okText="Ya"
-                        cancelText="Tidak"
-                      >
-                        <Button type="link" icon={<DeleteOutlined />} danger>
-                          Delete
-                        </Button>
-                      </Popconfirm>
-                    ]}
-                  >
-                    <List.Item.Meta
-                      avatar={
-                        <div style={{
-                          width: 32, height: 32, display: 'flex',
-                          alignItems: 'center', justifyContent: 'center',
-                          backgroundColor: '#f0f0f0', borderRadius: 4
-                        }}>
-                          <DeploymentUnitOutlined style={{ fontSize: 23, color: "#772d2f" }} />
-                        </div>
-                      }
-                      title={<Text strong>{rec.label}</Text>}
-                      description={
-                        <div>
-                          <Text type="secondary" style={{ display: 'block' }}>
-                            ID: {rec.reconstruction_id}
-                          </Text>
-                          <Text type="secondary" style={{ display: 'block' }}>
-                            Created: {new Date(rec.created_at).toLocaleDateString()}
-                          </Text>
-                          <Tag
-                            color={rec.status === 'ready' ? 'purple' : 'orange'}
-                            style={{ marginTop: 8 }}
-                          >
-                            Status: {rec.status}
-                          </Tag>
-                         <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                            <Tag color="blue">
-                              {rec.contributions.length} contributions
-                            </Tag>
-                            <Tag color="green">
-                              {rec.groups.length} groups
-                            </Tag>
-                          </div>
+                renderItem={rec => {
+                  const totalContribs = rec.groups.reduce(
+                    (sum, g) => sum + g.contributions.length, 
+                    0
+                  );
+                  return (
+                    <List.Item
+                      key={rec.reconstruction_id}
+                      style={{ borderBottom: '1px solid #f0f0f0', padding: '16px' }}
+                    >
+                      <Checkbox
+                        checked={selectedRecons.includes(rec.reconstruction_id)}
+                        onChange={() => toggleSelectRecon(rec.reconstruction_id)}
+                        style={{ marginRight: 12 }}
+                      />
 
-                        </div>
-                      }
-                    />
-                  </List.Item>
-                )}
+                      <List.Item.Meta
+                      
+                        title={<Text strong>{rec.label}</Text>}
+                        description={
+                          <div>
+                            <Text type="secondary" style={{ display: 'block' }}>
+                              ID: {rec.reconstruction_id}
+                            </Text>
+                            <Text type="secondary" style={{ display: 'block' }}>
+                              Created: {new Date(rec.created_at).toLocaleDateString()}
+                            </Text>
+                            <Tag color={rec.status === 'ready' ? 'purple' : 'orange'}>
+                              Status: {rec.status}
+                            </Tag>
+                            <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                            <Tag color="blue">
+                                    {totalContribs} contributions
+                                  </Tag>
+                              <Tag color="green">{rec.groups.length} groups</Tag>
+                            </div>
+                          </div>
+                        }
+                      />
+
+                      <List.Item.Meta
+                        style={{ marginLeft: '20rem' }}
+                        description={
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <Button
+                                type="link"
+                                icon={<CloudDownloadOutlined />}
+                                onClick={() => handleDownload(rec)}
+                                style={{ color: 'orange' }}
+                              >
+                                Download JSON
+                              </Button>
+                            <Button
+                              type="dashed"
+                              icon={<GroupOutlined />}
+                            onClick={() => {
+                                setActiveReconstruction(rec.reconstruction_id);
+                                setActiveTab('grouping');
+                              }}
+                            >
+                              Group
+                            </Button>
+
+                            <Popconfirm
+                              title="Yakin mau hapus?"
+                              onConfirm={() => reconStore.removeReconstruction(rec.reconstruction_id,dteParam)}
+                              okText="Ya"
+                              cancelText="Tidak"
+                            >
+                              <Button type="link" icon={<DeleteOutlined />} danger>
+                                Delete
+                              </Button>
+                            </Popconfirm>
+                          </div>
+                        }
+                      />
+                    </List.Item>
+                  )
+                }
+                }
+              
               />
-            )}
-          </TabPane>
+              ):(
+                <div style={{ padding: 48, textAlign: 'center' }}>
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    filterDate
+                      ? `Tidak ada reconstruction pada ${filterDate.format('DD MMM YYYY')}`
+                      : 'Pilih tanggal terlebih dahulu'
+                  }
+                />
+              </div>
+              )}
+        </TabPane>
 
           {/* Tab 2: Group Management */}
           <TabPane tab="Group Management" key="grouping">
             {activeReconstruction ? (
               <GroupManagement
                 reconstructionId={activeReconstruction}
+                filterDate={filterDate}
                 onBack={() => {
                   setActiveReconstruction(null);
                   setActiveTab('1');

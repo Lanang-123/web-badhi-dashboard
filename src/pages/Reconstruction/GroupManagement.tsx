@@ -36,16 +36,20 @@ import useReconstructionStore from '../../store/useReconstructionStore';
 import styles from './GroupManagement.module.css';
 import { FixedSizeList as List } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
+import { Moment } from 'moment';
+import { Dayjs } from 'dayjs';
 
 const { Title, Text } = Typography;
 const { Search } = Input;
 const { Option } = Select;
 
-type GroupManagementProps = {
+interface GroupManagementProps {
   reconstructionId: string;
+  filterDate: Dayjs | null; // Tambahkan ini
   onBack: () => void;
   onGoToConfiguration: () => void;
-};
+}
+
 
 interface Contribution {
   contribution_id: number;
@@ -245,7 +249,7 @@ const GroupItem = React.memo(({
   }, [isEditing]);
 
   return (
-    <div style={{ ...style, padding: 12 }}> 
+    <div style={{ ...style, padding: 12 }}  data-group-id={g.group_id}> 
       <Card
         title={
           <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -277,8 +281,21 @@ const GroupItem = React.memo(({
           </div>
         }
         className={styles.groupCard}
-        onDragOver={e => e.preventDefault()}
-        onDrop={e => handleDrop(e, g.group_id)}
+        onDrop={e => {
+          e.preventDefault();
+          handleDrop(e, g.group_id);
+          // Remove drag-over indicator
+          e.currentTarget.closest('[data-group-id]')?.removeAttribute('data-drag-over');
+        }}
+        onDragOver={e => {
+          e.preventDefault();
+          // Add visual indicator
+          e.currentTarget.closest('[data-group-id]')?.setAttribute('data-drag-over', 'true');
+        }}
+        onDragLeave={e => {
+          // Remove indicator
+          e.currentTarget.closest('[data-group-id]')?.removeAttribute('data-drag-over');
+        }}
         extra={
           <Button 
             type="link" 
@@ -351,18 +368,44 @@ const GroupItem = React.memo(({
 
 const GroupManagement: React.FC<GroupManagementProps> = ({ 
   reconstructionId, 
+  filterDate, // Terima prop
   onBack, 
   onGoToConfiguration 
+
 }) => {
   const recon = useReconstructionStore(state =>
     state.reconstructions.find(r => r.reconstruction_id === reconstructionId)
   );
+
+  const apiRecons = import.meta.env.VITE_API_RECONSTRUCTION_URL;
   
   // Gunakan referensi untuk fungsi store
   const storeRef = useRef(useReconstructionStore.getState());
   useEffect(() => {
     useReconstructionStore.subscribe(state => storeRef.current = state);
   }, []);
+
+  // Gunakan filterDate dalam query
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!reconstructionId || !filterDate) return;
+      
+      try {
+        const dateParam = filterDate.format('YYYYMMDD');
+        const response = await fetch(
+          `${apiRecons}/reconstructions/${reconstructionId}?date=${dateParam}`
+        );
+        const data = await response.json();
+        
+        // Update store dengan data baru
+        useReconstructionStore.getState().updateReconstructionData(data);
+      } catch (error) {
+        console.error('Failed to fetch reconstruction data:', error);
+      }
+    };
+
+    fetchData();
+  }, [reconstructionId, filterDate]);
 
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedContribs, setSelectedContribs] = useState<number[]>([]);
@@ -403,6 +446,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   });
 
   // Fungsi untuk menangani drop di area groups
+  
   const handleDropOnGroupsArea = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDraggingOverGroups(false);
@@ -413,13 +457,22 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
       const data = JSON.parse(e.dataTransfer.getData('application/json')) as DragItem;
       
       if (data.type === 'contribution') {
+        // Check if dropped on existing group card
+        const targetElement = e.target as HTMLElement;
+        const groupCard = targetElement.closest('[data-group-id]');
+        
+        if (groupCard) {
+          // Handled by GroupItem's onDrop - do nothing
+          return;
+        }
+        
+        // Create new group only if not dropped on existing group
         const items = recon.contributions.filter(c =>
           (data.ids as number[]).includes(c.contribution_id)
         );
         
         if (items.length === 0) return;
         
-        // Buat grup baru dengan nama default
         const newGroupName = `Group ${recon.groups.length + 1}`;
         const newGroupId = `group-${Date.now()}`;
         
@@ -1149,27 +1202,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
               </AutoSizer>
             )}
              {/* Overlay saat drag sedang terjadi */}
-            {isDraggingOverGroups && (
-              <div 
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  background: 'rgba(230, 247, 255, 0.7)',
-                  border: '2px dashed #1890ff',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  zIndex: 1000
-                }}
-              >
-                <Text strong style={{ fontSize: 18, color: '#1890ff' }}>
-                  Drop here to create a new group
-                </Text>
-              </div>
-            )}
+            
           </Card>
         </Col>
       </Row>
