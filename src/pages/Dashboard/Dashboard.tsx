@@ -15,7 +15,7 @@ import { rawRegionsGeo } from "../../data/map";
 import useTempleStore from "../../store/useTempleStore";
 import useContributionStore from "../../store/useContributionStore";
 import useAuthStore from '../../store/useAuthStore';
-import useReconstructionStore from '../../store/useReconstructionStore';
+// import useReconstructionStore from '../../store/useReconstructionStore';
 import styles from "./Dashboard.module.css";
 import "leaflet/dist/leaflet.css";
 import MarkIcon from "../../components/MarkIcon";
@@ -64,10 +64,10 @@ const highlightStyle = {
 };
 
 const Dashboard: React.FC = () => {
-  const [totalUsers, setTotalUsers] = useState(0);
+  // const [totalUsers, setTotalUsers] = useState(0);
   const [totalReconstructions, setTotalReconstructions] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [, setLoading] = useState(false);
+  const [, setError] = useState<string | null>(null);
 
     // Ambil token dari auth store
   const token = useAuthStore(state => state.token);
@@ -138,7 +138,7 @@ const Dashboard: React.FC = () => {
   
   // Statis data untuk demo
   const users = 0;
-  const onReview = 0;
+  // const onReview = 0;
   const regions = [
     "Buleleng", "Gianyar", "Karangasem", "Klungkung",
     "Tabanan", "Jembrana", "Bangli", "Badung", "Denpasar"
@@ -222,7 +222,7 @@ const Dashboard: React.FC = () => {
         const layer = e.target;
         layer.setStyle(regionStyle(feature));
       },
-      click: (e: any) => {
+      click: (_e: any) => {
         setSelectedRegion(feature.properties.name);
       }
     });

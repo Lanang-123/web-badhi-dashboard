@@ -15,7 +15,7 @@ import {
   Drawer,
   Avatar
 } from "antd";
-import { SearchOutlined, ClusterOutlined, CheckOutlined } from "@ant-design/icons";
+import { SearchOutlined, CheckOutlined } from "@ant-design/icons";
 import Swal from "sweetalert2";
 import { useParams, useNavigate } from "react-router-dom";
 
@@ -164,7 +164,7 @@ export default function ContributionDetail() {
     setActiveCategory(lvl);
   };
 
-  const showReconstructionModal = () => setIsReconstructionModalVisible(true);
+  // const showReconstructionModal = () => setIsReconstructionModalVisible(true);
   const handleReconstructionCancel = () => {
     form.resetFields();
     setIsReconstructionModalVisible(false);
@@ -183,9 +183,9 @@ export default function ContributionDetail() {
         return;
       }
       // ✔️ 3 args: label, user, templeId
-     const newRec = reconstructionStore.addReconstruction(
+     const newRec = await reconstructionStore.addReconstruction(
         values.label,
-        currentUser.name,
+        currentUser.id,
         [Number(id)] // ubah jadi array
       );
 

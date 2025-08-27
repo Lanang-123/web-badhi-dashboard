@@ -6,7 +6,6 @@ import {
   Space,
   Popconfirm,
   Form,
-  Typography,
   Card,
 } from "antd";
 import { PlusOutlined } from "@ant-design/icons";

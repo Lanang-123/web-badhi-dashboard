@@ -30,6 +30,7 @@ export interface Pura {
 // Struktur state dan action untuk store
 interface TempleState {
   temples: Pura[];                      // Data array Pura
+  setTemples: (temples: Pura[]) => void;
   count: number;                        // Jumlah item pada halaman ini
   loading: boolean;                     // Flag loading
   error: string | null;                 // Pesan error jika ada
@@ -43,6 +44,7 @@ const apiUrl = import.meta.env.VITE_API_URL;
 // Buat zustand store
 const useTempleStore = create<TempleState>((set) => ({
   temples: [],     // inisialisasi array kosong
+  setTemples: (temples: Pura[]) => set({ temples }),
   count: 0,        // inisialisasi count 0
   loading: false,
   error: null,

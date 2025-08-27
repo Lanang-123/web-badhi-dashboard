@@ -17,7 +17,8 @@ import {
 import { MoreOutlined } from "@ant-design/icons";
 import styles from './RequestTemple.module.css';
 import useTempleStore from "../../store/useTempleStore";
-import Pura from "../../assets/images/thumbnailPura.png"
+import type { Pura as PuraType } from "../../store/useTempleStore";
+import PuraImg from "../../assets/images/thumbnailPura.png";
 
 // 1. Import dayjs dan plugin
 import dayjs, { Dayjs } from "dayjs";
@@ -63,7 +64,7 @@ function RequestTemple() {
         name: 'Pura Penataran Kebon Agung',
         location: 'Karangasem, Kec. Abang, Desa Kerta Mandala',
         description: 'Pura Penataran Kebon Agung merupakan pura yang terletak di...',
-        image: Pura,
+        image: PuraImg,
         dateAdded: 'February 25, 2025',
         status: 'Pending',
       },
@@ -72,7 +73,7 @@ function RequestTemple() {
         name: 'Pura Dadya Dunungan Sentana Ki Dukuh Kedampal',
         location: 'Karangasem, Desa Datah',
         description: 'Pura Dadya Dunungan Sentana Ki Dukuh Kedampal terletak di...',
-        image: Pura,
+        image: PuraImg,
         dateAdded: 'February 23, 2025',
         status: 'Approved',
       },
@@ -81,53 +82,84 @@ function RequestTemple() {
         name: 'Pura Dadya Dunungan Sentana Ki Dukuh Kedampal 2',
         location: 'Desa Datah',
         description: 'Pura Dadya Dunungan Sentana Ki Dukuh Kedampal terletak di...',
-        image: Pura,
+        image: PuraImg,
         dateAdded: 'February 21, 2025',
         status: 'Rejected',
       },
     ];
-    setTemples(initialData);
+    // Map Temple -> Pura
+    const puraData: PuraType[] = initialData.map(t => ({
+      md_temples_id: t.id,                     // pakai id sebagai md_temples_id
+      md_temple_types_id: 0,                   // default / placeholder
+      user_id: 0,                              // default / placeholder
+      area_id: { Int64: 0, Valid: false },     // default
+      name: t.name,
+      location_name: t.location,
+      lat: 0,                                  // jika tidak ada data lat/lng, isi 0
+      lng: 0,
+      description: t.description,
+      file_path: t.image,                      // map image -> file_path
+      visibility: "public",
+      temple_type: "",
+      total_contributions: 0,
+      created_at: dayjs(t.dateAdded, "MMMM D, YYYY").isValid()
+        ? dayjs(t.dateAdded, "MMMM D, YYYY").toISOString()
+        : new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      deleted_at: null,
+    }));
+    setTemples(puraData);
   }, [setTemples]);
 
   // Proses filter
   useEffect(() => {
-    let newData = temples;
+  // convert PuraType[] → Temple[]
+  let newData: Temple[] = temples.map((t) => ({
+    id: t.md_temples_id,
+    name: t.name,
+    location: t.location_name ?? "",
+    description: t.description ?? "",
+    image: t.file_path ?? PuraImg,
+    dateAdded: dayjs(t.created_at).format("MMMM D, YYYY"),
+    status: "Pending" as TempleStatus, // atau mapping sesuai logika di store
+  }));
 
-    // Filter Name
-    if (nameFilter.trim() !== "") {
-      newData = newData.filter((temple) =>
-        temple.name.toLowerCase().includes(nameFilter.toLowerCase())
+  // Filter Name
+  if (nameFilter.trim() !== "") {
+    newData = newData.filter((temple) =>
+      temple.name.toLowerCase().includes(nameFilter.toLowerCase())
+    );
+  }
+
+  // Filter Location
+  if (locationFilter.trim() !== "") {
+    newData = newData.filter((temple) =>
+      temple.location.toLowerCase().includes(locationFilter.toLowerCase())
+    );
+  }
+
+  // Filter Date Range
+  if (dateRangeFilter[0] && dateRangeFilter[1]) {
+    newData = newData.filter((temple) => {
+      const templeDate = dayjs(temple.dateAdded, "MMMM D, YYYY");
+      if (!templeDate.isValid()) return false;
+      return templeDate.isBetween(
+        dateRangeFilter[0] as Dayjs,
+        dateRangeFilter[1] as Dayjs,
+        "day",
+        "[]"
       );
-    }
+    });
+  }
 
-    // Filter Location
-    if (locationFilter.trim() !== "") {
-      newData = newData.filter((temple) =>
-        temple.location.toLowerCase().includes(locationFilter.toLowerCase())
-      );
-    }
+  // Filter Status
+  if (statusFilter !== "All") {
+    newData = newData.filter((temple) => temple.status === statusFilter);
+  }
 
-    // Filter Date Range
-    if (dateRangeFilter[0] && dateRangeFilter[1]) {
-      newData = newData.filter((temple) => {
-        const templeDate = dayjs(temple.dateAdded, "MMMM D, YYYY");
-        if (!templeDate.isValid()) return false;
-        return templeDate.isBetween(
-          dateRangeFilter[0] as Dayjs,
-          dateRangeFilter[1] as Dayjs,
-          "day",
-          "[]"
-        );
-      });
-    }
+  setFilteredData(newData);
+}, [temples, nameFilter, locationFilter, dateRangeFilter, statusFilter]);
 
-    // Filter Status
-    if (statusFilter !== "All") {
-      newData = newData.filter((temple) => temple.status === statusFilter);
-    }
-
-    setFilteredData(newData);
-  }, [temples, nameFilter, locationFilter, dateRangeFilter, statusFilter]);
 
   // Fungsi ketika user memilih action
   const handleMenuClick = (record: Temple, actionKey: string) => {
