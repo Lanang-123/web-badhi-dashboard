@@ -108,7 +108,7 @@ interface FileUploadState {
 }
 
 const CONTRIB_ITEM_HEIGHT = 100;
-const GROUP_ITEM_HEIGHT = 400;
+// const GROUP_ITEM_HEIGHT = 400;
 
 const ContribItem = React.memo(({ 
   c, 
@@ -231,8 +231,6 @@ const GroupItem = React.memo(({
   startEditing,
   handleDeleteGroup,
   handleRemoveContribution,
-  setViewingGroup,
-  reconstructionId,
   handleDrop,
   style,
   onUploadModel,
@@ -522,7 +520,6 @@ const GroupItem = React.memo(({
 const GroupManagement: React.FC<GroupManagementProps> = ({ 
   reconstructionId, 
   filterDate,
-  onBack, 
   onGoToConfiguration,
   reconstructionStatus 
 }) => {
@@ -564,7 +561,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   const [mergeModalVisible, setMergeModalVisible] = useState(false);
   const [mergedGroupName, setMergedGroupName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isDraggingOverGroups, setIsDraggingOverGroups] = useState(false);
+  const [, setIsDraggingOverGroups] = useState(false);
   const [editingGroup, setEditingGroup] = useState<{id: string; name: string} | null>(null);
   const [tempGroupName, setTempGroupName] = useState('');
   const [contribFilters, setContribFilters] = useState<FilterState>({
@@ -580,7 +577,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   const [viewingContribution, setViewingContribution] = useState<Contribution | null>(null);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<{ groupId: string; groupName: string } | null>(null);
-  const [initializationFlags] = useState({ default: false, area: false });
+  const [_initializationFlags] = useState({ default: false, area: false });
   
   // State untuk upload model
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
@@ -797,39 +794,39 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
     }
   }, [targetGroup, selectedContribs, recon, reconstructionId]);
 
-  const removeSelectedContribs = useCallback(() => {
-    if (selectedContribs.length === 0) return;
+  // const removeSelectedContribs = useCallback(() => {
+  //   if (selectedContribs.length === 0) return;
     
-    Modal.confirm({
-      title: 'Confirm Removal',
-      content: `Are you sure you want to remove ${selectedContribs.length} contributions from their groups?`,
-      onOk: () => {
-        const contribs = recon?.contributions.filter(c => 
-          selectedContribs.includes(c.contribution_id)) || [];
+  //   Modal.confirm({
+  //     title: 'Confirm Removal',
+  //     content: `Are you sure you want to remove ${selectedContribs.length} contributions from their groups?`,
+  //     onOk: () => {
+  //       const contribs = recon?.contributions.filter(c => 
+  //         selectedContribs.includes(c.contribution_id)) || [];
         
-        recon?.groups.forEach(group => {
-          const itemsInGroup = group.contributions.filter(c =>
-            selectedContribs.includes(c.contribution_id)
-          );
+  //       recon?.groups.forEach(group => {
+  //         const itemsInGroup = group.contributions.filter(c =>
+  //           selectedContribs.includes(c.contribution_id)
+  //         );
 
-          if (itemsInGroup.length > 0) {
-            try {
-              storeRef.current.removeContributionsFromGroup(
-                reconstructionId, 
-                group.group_id, 
-                itemsInGroup
-              );
-              message.success(`${itemsInGroup.length} contributions removed from groups`);
-            } catch (error) {
-              message.error(`Failed to remove contributions from group ${group.name}: ` + (error as Error).message);
-            }
-          }
-        });
+  //         if (itemsInGroup.length > 0) {
+  //           try {
+  //             storeRef.current.removeContributionsFromGroup(
+  //               reconstructionId, 
+  //               group.group_id, 
+  //               itemsInGroup
+  //             );
+  //             message.success(`${itemsInGroup.length} contributions removed from groups`);
+  //           } catch (error) {
+  //             message.error(`Failed to remove contributions from group ${group.name}: ` + (error as Error).message);
+  //           }
+  //         }
+  //       });
 
-        setSelectedContribs([]);
-      }
-    });
-  }, [selectedContribs, recon, reconstructionId]);
+  //       setSelectedContribs([]);
+  //     }
+  //   });
+  // }, [selectedContribs, recon, reconstructionId]);
 
   const handleDeleteGroup = useCallback((groupId: string, groupName: string) => {
     setGroupToDelete({ groupId, groupName });
@@ -1059,7 +1056,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   const [modelId, setModelId] = useState<string>('');
   const uploadGroupModel = useReconstructionStore(state => state.uploadGroupModel);
 
-  const beforeUpload = (file: RcFile, field: keyof FileUploadState) => {
+  const beforeUpload = (_file: RcFile, _field: keyof FileUploadState) => {
     return false; // prevent auto upload
   };
 
@@ -1490,7 +1487,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
                 setFiles(prev => ({ ...prev, model_files: fileList }))
               }
               beforeUpload={file => beforeUpload(file, 'model_files')}
-              itemRender={(originNode, file) => (
+              itemRender={(originNode, _file) => (
                 <div style={{
                   maxWidth: '100%',
                   overflow: 'hidden',
@@ -1555,7 +1552,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
                     }));
                   }}
                   beforeUpload={file => beforeUpload(file, uploadKey)}
-                  itemRender={(originNode, file) => (
+                  itemRender={(originNode, _file) => (
                     <div style={{
                       maxWidth: '100%',
                       overflow: 'hidden',

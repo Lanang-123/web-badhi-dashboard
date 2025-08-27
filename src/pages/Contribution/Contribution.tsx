@@ -1,8 +1,7 @@
 // src/pages/Contribution.tsx
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
-  Button,
   Card,
   Col,
   Layout,
@@ -17,7 +16,7 @@ import { Link } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 
 import useChartContributionStore from "../../store/useChartContributionStore";
-import useTempleStore, { Pura } from "../../store/useTempleStore";
+import useTempleStore from "../../store/useTempleStore";
 
 import styles from "./Contribution.module.css";
 

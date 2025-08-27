@@ -5,7 +5,6 @@ import { Layout, Menu, Avatar, Typography, Button } from "antd";
 import {
   HomeOutlined,
   MenuFoldOutlined,
-  CheckCircleOutlined,
   LogoutOutlined,
   ClusterOutlined,
   SettingOutlined

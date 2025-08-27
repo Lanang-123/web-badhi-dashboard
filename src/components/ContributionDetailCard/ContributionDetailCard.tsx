@@ -15,7 +15,7 @@ import {
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import styles from "./ContributionDetailCard.module.css";
-import useAuthStore from "../../store/useAuthStore";
+// import useAuthStore from "../../store/useAuthStore";
 
 import VideoRatingModal from "../VideoRatingModal/VideoRatingModal";
 import useReconstructionStore from "../../store/useReconstructionStore"; 
@@ -45,15 +45,16 @@ type Props = {
 
 export default function ContributionDetailCard({ data, reconstructionId }: Props) {
   const [isModalVisible, setIsModalVisible] = useState(false);
-  const currentUser = useAuthStore((state) => state.user);
+  // const currentUser = useAuthStore((state) => state.user);
   const reconstructionStore = useReconstructionStore();
 
   const contributionData = {
-      contribution_id: data.tx_contribution_id,
-          temple_name: data.name,
-          share_link: data.file_path,
-          privacy_setting: data.license_type === 1 ? "public" : "private"
-        }
+  contribution_id: data.tx_contribution_id,
+  contribution_name: data.name,
+  share_link: data.file_path,
+  privacy_setting: data.license_type === 1 ? "public" : "private",
+  temple_name: data.level_area ?? "Unknown Temple", // <-- tambah ini
+};
 
   const selected = reconstructionId
     ? reconstructionStore.getSelectedContributions(reconstructionId)

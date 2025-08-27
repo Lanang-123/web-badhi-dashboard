@@ -17,12 +17,10 @@ import {
   message,
   Select,
   DatePicker,
-  UploadFile
 } from 'antd';
 import {
   CloudDownloadOutlined,
   DeleteOutlined,
-  DeploymentUnitOutlined,
   GroupOutlined,
   DeliveredProcedureOutlined
 } from '@ant-design/icons';
@@ -34,9 +32,9 @@ import styles from './Reconstruction.module.css';
 import GroupManagement from './GroupManagement';
 import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
-import moment, { Moment } from 'moment';
+// import moment, { Moment } from 'moment';
 import dayjs, { Dayjs } from 'dayjs';
-import FileUploadModel from '../../components/Reconstruction/FileUploadModel';
+// import FileUploadModel from '../../components/Reconstruction/FileUploadModel';
 
 interface ReconstructionProps {
   reconstructionId: string;
@@ -58,8 +56,8 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
   const [filterDate, setFilterDate] = useState<Dayjs | null>(dayjs());
   const reconStore = useReconstructionStore();
   const [selectedRecons, setSelectedRecons] = useState<string[]>([]);
-  const [uploadModalVisible, setUploadModalVisible] = useState(false);
-  const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
+  // const [uploadModalVisible, setUploadModalVisible] = useState(false);
+  // const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
    
    
   // Load global configs
@@ -75,41 +73,41 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
   
   const templeStore = useTempleStore();
   const contribStore = useContributionStore();
-  const [searchText, setSearchText] = useState('');
+  const [, setSearchText] = useState('');
 
   const {user} = useAuthStore();
 
   const [activeTab, setActiveTab] = useState<'1' | 'grouping' | 'configuration'>('1');
   const [activeReconstruction, setActiveReconstruction] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  // const [uploading, setUploading] = useState(false);
 
   // State for create reconstruction flow
   const [createModalVisible, setCreateModalVisible] = useState(false);
-  const [showContribModal, setShowContribModal] = useState(false);
+  const [, setShowContribModal] = useState(false);
   const [selectedTempleIds, setSelectedTempleIds] = useState<number[]>([]);
   const [label, setLabel] = useState<string>('');
-  const [activeCategory, setActiveCategory] = useState<Level>('all');
-  const [page, setPage] = useState(1);
-  const [selectedContribIds, setSelectedContribIds] = useState<number[]>([]);
+  const [, setActiveCategory] = useState<Level>('all');
+  const [, setPage] = useState(1);
+  const [, setSelectedContribIds] = useState<number[]>([]);
 
   // State for add contributions to existing reconstruction
-  const [addContribModalVisible, setAddContribModalVisible] = useState(false);
-  const [currentReconstructionId, setCurrentReconstructionId] = useState<string | null>(null);
-  const [addContribActiveCategory, setAddContribActiveCategory] = useState<Level>('nista');
+  const [addContribModalVisible, ] = useState(false);
+  const [currentReconstructionId, ] = useState<string | null>(null);
+  const [addContribActiveCategory] = useState<Level>('nista');
   const [addContribPage, setAddContribPage] = useState(1);
-  const [addContribSelectedIds, setAddContribSelectedIds] = useState<number[]>([]);
-  const [addContribSearchText, setAddContribSearchText] = useState('');
+  // const [, setAddContribSelectedIds] = useState<number[]>([]);
+  // const [, setAddContribSearchText] = useState('');
 
   // State for pagination and search
   const [templePage, setTemplePage] = useState(1);
-  const [templePageSize] = useState(5); // Fixed page size for temples
-  const [templeTotal, setTempleTotal] = useState(0);
+  const [] = useState(5); // Fixed page size for temples
+  // const [templeTotal, setTempleTotal] = useState(0);
    const [templeSearchText, setTempleSearchText] = useState('');
-  const [debouncedTempleSearchText, setDebouncedTempleSearchText] = useState('');
-  const [searchTimeout, setSearchTimeout] = useState<number | null>(null); // Perbaikan di si
+  const [debouncedTempleSearchText, ] = useState('');
+  // const [searchTimeout, setSearchTimeout] = useState<number | null>(null); // Perbaikan di si
   const [loadingTemples, setLoadingTemples] = useState(false);
-  const [loadingContributions, setLoadingContributions] = useState(false);
-  const [loadingAddContributions, setLoadingAddContributions] = useState(false);
+  const [, setLoadingContributions] = useState(false);
+  const [, setLoadingAddContributions] = useState(false);
 
   const loaderRef = useRef<HTMLDivElement>(null);
   const addContribLoaderRef = useRef<HTMLDivElement>(null);
@@ -121,7 +119,7 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
  const apiUrl = import.meta.env.VITE_API_URL as string;
  const apiRecons = import.meta.env.VITE_API_RECONSTRUCTION_URL;
 
- const dteParam = filterDate?.format('YYYYMMDD') ?? '';
+//  const dteParam = filterDate?.format('YYYYMMDD') ?? '';
 
   useEffect(() => {
     const fetchRecons = async () => {
@@ -809,54 +807,54 @@ const handleSave = async () => {
 
 
   // Open add contributions modal
- const openAddContribModal = (reconstructionId: string) => {
-    const reconstruction = reconStore.reconstructions.find(
-      r => r.reconstruction_id === reconstructionId
-    );
-    if (!reconstruction) {
-      message.error('Reconstruction not found');
-      return;
-    }
+//  const openAddContribModal = (reconstructionId: string) => {
+//     const reconstruction = reconStore.reconstructions.find(
+//       r => r.reconstruction_id === reconstructionId
+//     );
+//     if (!reconstruction) {
+//       message.error('Reconstruction not found');
+//       return;
+//     }
 
-    setCurrentReconstructionId(reconstructionId);
+//     setCurrentReconstructionId(reconstructionId);
 
-    // Sesuaikan dengan tipe array
-    setSelectedTempleIds(reconstruction.temple_ids);
+//     // Sesuaikan dengan tipe array
+//     setSelectedTempleIds(reconstruction.temple_ids);
 
-    // Inisialisasi selected contributions
-    const existingIds = reconstruction.contributions.map(c => c.contribution_id);
-    setAddContribSelectedIds(existingIds);
+//     // Inisialisasi selected contributions
+//     const existingIds = reconstruction.contributions.map(c => c.contribution_id);
+//     setAddContribSelectedIds(existingIds);
 
-    setAddContribPage(1);
-    setAddContribActiveCategory('nista');
-    setAddContribSearchText('');
-    setAddContribModalVisible(true);
-  };
+//     setAddContribPage(1);
+//     setAddContribActiveCategory('nista');
+//     setAddContribSearchText('');
+//     setAddContribModalVisible(true);
+//   };
 
 
-  const totalContribs = rec?.groups.reduce(
-      (sum, g) => sum + g.contributions.length,
-      0
-    );
+  // const totalContribs = rec?.groups.reduce(
+  //     (sum, g) => sum + g.contributions.length,
+  //     0
+  //   );
 
 
   // Close all modals
-  const closeAllModals = () => {
-    setCreateModalVisible(false);
-    setShowContribModal(false);
-    setSelectedTempleIds([]); // ← perbaikan di sini
-    setLabel('');
-    setSelectedContribIds([]);
-    setTemplePage(1);
-    setTempleSearchText('');
-  };
+  // const closeAllModals = () => {
+  //   setCreateModalVisible(false);
+  //   setShowContribModal(false);
+  //   setSelectedTempleIds([]); // ← perbaikan di sini
+  //   setLabel('');
+  //   setSelectedContribIds([]);
+  //   setTemplePage(1);
+  //   setTempleSearchText('');
+  // };
 
 
    // Disable config tab if no groups
   // Menjadi:
     const configDisabled = !rec || rec.groups.length === 0 || rec.status !== 'ready';
-    const isReady       = rec?.status === 'ready';
-    const deleteDisabled = !rec || isReady;
+    // const isReady       = rec?.status === 'ready';
+    // const deleteDisabled = !rec || isReady;
     
       
   return (
