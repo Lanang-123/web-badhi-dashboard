@@ -1,3 +1,4 @@
+import { UploadFile } from 'antd';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
@@ -25,7 +26,7 @@ export interface Group {
   group_id: string;
   name: string;
   contributions: Contribution[];
-  model: string | null;
+  model: string | { model_id: string; [key: string]: any } | null; 
   status: 'pending' | 'processing' | 'success' | 'failed';
 }
 
@@ -48,7 +49,7 @@ export interface ReconstructionState {
   reconstructions: ReconstructionMetadata[];
   setReconstructions: (recons: ReconstructionMetadata[]) => void;
 
-  postReconstructionForAPI: (reconstructionId: string) => Promise<void>;
+   postReconstructionForAPI: (reconstructionId: string) => Promise<ReconstructionMetadata>;
 
   // Global configuration list (untuk Settings)
   configs: ConfigItem[];
@@ -57,7 +58,7 @@ export interface ReconstructionState {
   removeConfig: (key: string) => void;
 
   // Reconstruction actions
-  addReconstruction: (label: string, creator: number, templeIds: number[]) => ReconstructionMetadata;
+  addReconstruction: (label: string, creator: number, templeIds: number[]) =>  Promise<ReconstructionMetadata>;
   removeReconstruction: (reconstructionId: string,date: string) => void;
   updateReconstructionContributions: (reconstructionId: string, contributions: Contribution[]) => void;
   toggleContribution: (reconstructionId: string, contribution: Contribution) => void;
@@ -66,10 +67,25 @@ export interface ReconstructionState {
   updateReconstructionData: (data: ReconstructionMetadata) => void;
 
   // Group management
-  addGroup: (reconstructionId: string, groupName: string) => void;
+  addGroup: (reconstructionId: string, groupName: string) => Promise<ReconstructionMetadata>,
   removeGroup: (reconstructionId: string, groupId: string) => void;
   addContributionsToGroup: (reconstructionId: string, groupId: string, contributions: Contribution[]) => void;
   updateGroupName: (reconstructionId: string, groupId: string, newName: string) => void;
+    uploadGroupModel: (
+    reconstructionId: string,
+    groupId: string,
+    modelID:string,
+    files: {
+      model_files?: UploadFile<any>[];
+      log?: UploadFile<any>;
+      eval?: UploadFile<any>;
+      nerfstudio_data?: UploadFile<any>;
+      nerfstudio_model?: UploadFile<any>;
+    },
+    date: string
+  ) => Promise<boolean>;
+
+  
   
   // New functions for group management
   moveContributionsBetweenGroups: (
@@ -100,7 +116,7 @@ export interface ReconstructionState {
     groupId: string, 
     groupName: string, 
     contributions: Contribution[]
-  ) => void;
+  ) =>  Promise<ReconstructionMetadata>
   
   mergeGroups: (
     reconstructionId: string, 
@@ -117,108 +133,318 @@ export interface ReconstructionState {
   setGroups: (reconstructionId: string, groups: Group[]) => void;
 }
 
+// --- Helper: Omit contributions from payload ---
+function omitUnnecessaryFields(rec: ReconstructionMetadata) {
+  // Keluarkan hanya temple_ids & contributions di root
+  const { temple_ids, contributions: rootContribs, ...rest } = rec;
+
+  return {
+    ...rest,                          // semua properti lain di root (kecuali temple_ids & rootContribs)
+    groups: rec.groups.map(group => ({
+      ...group,                       // semua field group lainnya
+      contributions: group.contributions, // pastikan nested contributions ikut terkirim
+    })),
+  };
+}
+
+
+// --- Sync to API ---
+async function syncRecToApi(rec: ReconstructionMetadata): Promise<ReconstructionMetadata> {
+  // 1. Ambil token dari localStorage
+  let token: string | null = null;
+  try {
+    const authRaw = localStorage.getItem('auth-storage');
+    if (authRaw) {
+      const auth = JSON.parse(authRaw);
+      token = auth.state?.token ?? null;
+    }
+  } catch {
+    token = null;
+  }
+
+  // 2. Siapkan headers
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  // 3. Omit contributions sebelum send
+  const payload = omitUnnecessaryFields(rec);
+
+  try {
+    const res = await fetch(`${apiRecons}/${rec.reconstruction_id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`API status ${res.status}`);
+    console.log('sinkron berhasil');
+  } catch (err) {
+    console.error('API sync error:', err);
+    // Optional: rollback atau set error flag di rec.status
+  }
+
+  return rec;
+}
+
+
 const useReconstructionStore = create<ReconstructionState>()(
   persist(
     (set, get) => ({
       
       reconstructions: [],
-       setReconstructions: (recons) => 
-        set({ 
-          reconstructions: recons.map(rec => ({
-            ...rec,
-            contributions: rec.contributions || [], // Pastikan array contributions
-            groups: rec.groups.map(group => ({
-              ...group,
-              contributions: group.contributions.map(contrib => ({
-                ...contrib,
-                category: contrib.category || 'other',
-                temple_id: contrib.temple_id || 0,
-                privacy_setting: contrib.privacy_setting || 'public'
+      setReconstructions: (recons) =>
+        set(state => {
+          const oldRecons = state.reconstructions
+
+          const merged = recons.map(rec => {
+            const prev = oldRecons.find(r => r.reconstruction_id === rec.reconstruction_id)
+            return {
+              ...rec,
+              contributions: prev?.contributions?.length
+                ? prev.contributions
+                : rec.contributions ?? [],
+              groups: rec.groups.map(g => ({
+                ...g,
+                contributions: g.contributions.map(c => ({
+                  ...c,
+                  category: c.category ?? 'other',
+                  temple_id: c.temple_id ?? 0,
+                  privacy_setting: c.privacy_setting ?? 'public'
+                }))
               }))
-            }))
-          }))
+            } as ReconstructionMetadata
+          })
+
+          // **HANYA** return properti yang mau di‑update
+          return { reconstructions: merged }
         }),
       configs: [],
 
-      postReconstructionForAPI: async (reconstructionId) => {
-        const state = get();
-        const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
-        if (!rec) throw new Error('Reconstruction not found');
+    uploadGroupModel: async (
+      reconstructionId: string,
+      groupId: string,
+      modelID: string,
+      files: {
+        model_files?: UploadFile<any>[];
+        log?: UploadFile<any>;
+        eval?: UploadFile<any>;
+        nerfstudio_data?: UploadFile<any>;
+        nerfstudio_model?: UploadFile<any>;
+      },
+      date: string
+    ): Promise<boolean> => {
+      const formData = new FormData();
+      formData.append('model_id', modelID);
 
-        // --- Ubah di sini ---
-        const payload = {
-          reconstruction_id: rec.reconstruction_id,
-          label: rec.label,
-          user: rec.user,
-          created_date: rec.created_at,
-          configuration: rec.configuration?.value || "",
-          status: 'ready',
+      files.model_files?.forEach(uf => {
+        if (uf.originFileObj) formData.append('model_files', uf.originFileObj);
+      });
+      if (files.log?.originFileObj) formData.append('log', files.log.originFileObj);
+      if (files.eval?.originFileObj) formData.append('eval', files.eval.originFileObj);
+      if (files.nerfstudio_data?.originFileObj)
+        formData.append('nerfstudio_data', files.nerfstudio_data.originFileObj);
+      if (files.nerfstudio_model?.originFileObj)
+        formData.append('nerfstudio_model', files.nerfstudio_model.originFileObj);
 
-          // sebelumnya:
-          // groups: rec.groups.map(g => g.group_id),
-
-          // sekarang kirim seluruh data grup:
-          groups: rec.groups.map(g => ({
-            group_id:    g.group_id,
-            name:        g.name,
-            model:       g.model,
-            status:      g.status,
-            contributions: g.contributions.map(c => ({
-              contribution_id:   c.contribution_id,
-              contribution_name: c.contribution_name,
-              temple_name:       c.temple_name,
-              share_link:        c.share_link,
-              privacy_setting:   c.privacy_setting,
-              category:          c.category,
-              temple_id:         c.temple_id
-            }))
-          }))
-          // —atau cukup groups: rec.groups, jika struktur objeknya sudah pas—
-        };
-        // ------------------
-
-        try {
-          // panggil API dengan `payload`
-          const response = await fetch(`${apiRecons}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          if (!response.ok) throw new Error('Failed to save reconstruction');
-       
-          state.updateStatus(reconstructionId, 'ready');
-         
-          
-        } catch (error) {
-          console.error('API Error:', error);
-          throw error;
+      // Token
+      let token: string | null = null;
+      try {
+        const raw = localStorage.getItem('auth-storage');
+        if (raw) {
+          const auth = JSON.parse(raw);
+          token = auth.state?.token ?? null;
         }
+      } catch {}
+
+      const response = await fetch(
+        `${apiRecons}/model/${reconstructionId}?groupID=${groupId}&month=${date}`,
+        {
+          method: 'PUT',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        console.error('Upload failed:', await response.text());
+        return false;
+      }
+
+     
+  // ✅ Update state dengan tipe yang eksplisit
+  const newReconstructions = get().reconstructions.map(rec => {
+    if (rec.reconstruction_id !== reconstructionId) {
+      return rec;
+    }
+
+    // Eksplisit tipe untuk group yang di-update
+    const updatedGroups: Group[] = rec.groups.map(g => {
+      if (g.group_id !== groupId) {
+        return g;
+      }
+      
+      // Pastikan modelInfo sesuai dengan tipe Group['model']
+      const updatedModel: Group['model'] = {
+        model_id: modelID,
+        model_files: files.model_files?.map(f => f.name) ?? [],
+        log: files.log?.name,
+        eval: files.eval?.name,
+        nerfstudio_data: files.nerfstudio_data?.name,
+        nerfstudio_model: files.nerfstudio_model?.name,
+        date,
+      };
+
+      return {
+        ...g,
+        status: 'success',
+        model: updatedModel,
+      };
+    });
+
+    // Eksplisit tipe untuk reconstruction yang di-update
+          const updatedRec: ReconstructionMetadata = {
+            ...rec,
+            status: 'ready',
+            groups: updatedGroups,
+          };
+
+          return updatedRec;
+        });
+
+        set({ reconstructions: newReconstructions });
+        return true;
+    },
+
+
+
+
+      postReconstructionForAPI: async (reconstructionId) => {
+  const state = get();
+  const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
+  if (!rec) throw new Error('Reconstruction not found');
+
+  // Simpan status lama untuk rollback
+  const prevStatus = rec.status;
+
+  // 1. Set status root jadi 'ready' di local state
+  set(s => ({
+    reconstructions: s.reconstructions.map(r =>
+      r.reconstruction_id === reconstructionId
+        ? { ...r, status: 'ready' }
+        : r
+    )
+  }));
+
+  // 2. Ambil kembali rec yang sudah status='ready'
+  const updatedRec = get().reconstructions.find(r => r.reconstruction_id === reconstructionId)!;
+
+  // 3. Bangun payload secara manual:
+  //    - omit temple_ids & root.contributions
+  //    - set root.configuration = configuration.value
+  //    - set root.status = 'ready'
+  //    - include groups[].contributions
+  const { temple_ids, contributions: rootContribs, ...base } = updatedRec;
+  const payload = {
+    ...base,
+    configuration: updatedRec.configuration?.value,
+    status: 'ready',
+    groups: updatedRec.groups.map(g => ({
+      ...g,
+      contributions: g.contributions,  // keep nested contributions
+    })),
+  };
+
+  // 4. Ambil token dan headers seperti biasa
+  let token: string | null = null;
+  try {
+    const authRaw = localStorage.getItem('auth-storage');
+    if (authRaw) {
+      const auth = JSON.parse(authRaw);
+      token = auth.state?.token || null;
+    }
+  } catch {
+    console.warn('Failed to parse auth-storage');
+  }
+  const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  // 5. Panggil API dengan payload di atas
+  try {
+    const response = await fetch(`${apiRecons}/${reconstructionId}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`API status ${response.status}: ${errText}`);
+    }
+    console.log('Sync berhasil');
+    return updatedRec;
+  } catch (err) {
+    console.error('Sync gagal:', err);
+    // rollback status kalau perlu
+    set(s => ({
+      reconstructions: s.reconstructions.map(r =>
+        r.reconstruction_id === reconstructionId
+          ? { ...r, status: prevStatus }
+          : r
+      )
+    }));
+    throw err;
+  }
       },
 
-
-      // Tambah reconstruction baru
-      addReconstruction: (label: string, creator: number, templeIds: number[]) => {
-        
-        
-
-
+      addReconstruction: async (label, creator, templeIds) => {
         const newId = `rec-${Date.now()}`;
         const now = new Date().toISOString();
         const newRec: ReconstructionMetadata = {
           reconstruction_id: newId,
           label,
-          temple_ids: templeIds,  // Simpan SEMUA temple IDs
+          temple_ids: templeIds,
           groups: [],
           user: creator,
           created_at: now,
           configuration: null,
           status: 'idle',
-          contributions: [], // Akan diisi nanti,
-          deleted_at:null,
+          contributions: [],
+          deleted_at: null,
         };
-        set(state => ({ reconstructions: [...state.reconstructions, newRec] }));
+
+        // Simpan di local state terlebih dahulu
+        set(state => ({
+          reconstructions: [...state.reconstructions, newRec]
+        }));
+
+        // Ambil token
+        let token: string | null = null;
+        try {
+          const authRaw = localStorage.getItem('auth-storage');
+          if (authRaw) token = JSON.parse(authRaw).state?.token || null;
+        } catch {}
+
+        const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        // Kirim ke API
+        const response = await fetch(`${apiRecons}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(newRec),
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          console.error('Failed to create reconstruction:', text);
+          throw new Error(`API status ${response.status}`);
+        }
+
+        console.log('Reconstruction created successfully');
         return newRec;
       },
+
 
       updateReconstructionData: (data) => {
         set(state => ({
@@ -231,38 +457,55 @@ const useReconstructionStore = create<ReconstructionState>()(
       },
 
       // Hapus reconstruction
-       removeReconstruction: async (reconstructionId,date) => {
-          try {
-            // 1) Panggil API untuk hapus data di server
-            const res = await fetch(`${apiRecons}/${reconstructionId}?date=${date}`, {
-              method: 'DELETE',
-              headers: { 'Content-Type': 'application/json' },
-            });
-            const result = await res.json();
-            if(result.message == "Successfully delete reconstruction") {
-               // 2) Kalau sukses, baru update state
-                set(state => ({
-                  reconstructions: state.reconstructions.filter(
-                    rec => rec.reconstruction_id !== reconstructionId
-                  )
-                }));
-            }
-            
-            if (!res.ok) {
-              // baca error dari body (jika ada)
-              const errBody = await res.json().catch(() => ({}));
-              throw new Error(errBody.message || 'Failed to delete reconstruction');
-            }
-
-           
-
-           
-          } catch (err: any) {
-            console.error('Error deleting reconstruction:', err);
-            console.log(err.message);
-           
+      removeReconstruction: async (reconstructionId: string, date: string) => {
+        // 1. Ambil JWT dari localStorage
+        let token: string | null = null;
+        try {
+          const authRaw = localStorage.getItem('auth-storage');
+          if (authRaw) {
+            const auth = JSON.parse(authRaw);
+            token = auth.state?.token || null;
           }
-        },
+        } catch {
+          console.warn('Failed to parse auth-storage');
+        }
+
+        // 2. Siapkan headers, sertakan Authorization bila ada token
+        const headers: Record<string,string> = {
+          'Content-Type': 'application/json',
+        };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        try {
+          // 3. Panggil API DELETE dengan header Bearer
+          const res = await fetch(
+            `${apiRecons}/${reconstructionId}?month=${date}`,
+            { method: 'DELETE', headers }
+          );
+
+          // 4. Baca body JSON (jika ada)
+          const result = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            // Kalau HTTP status bukan 2xx, lempar error
+            throw new Error(result.message || `Failed to delete (status ${res.status})`);
+          }
+
+          // 5. Kalau server menjawab sukses, update local state
+          if (result.message === 'Successfully delete reconstruction') {
+            set(state => ({
+              reconstructions: state.reconstructions.filter(
+                rec => rec.reconstruction_id !== reconstructionId
+              )
+            }));
+          }
+        } catch (err: any) {
+          console.error('Error deleting reconstruction:', err);
+        }
+      },
+
 
       // Update list contributions
       updateReconstructionContributions: (reconstructionId, contributions) => {
@@ -306,130 +549,327 @@ const useReconstructionStore = create<ReconstructionState>()(
       getAllReconstructions: () => get().reconstructions,
 
       // Group management
-      addGroup: (reconstructionId, groupName) => {
-        set(state => ({
-          reconstructions: state.reconstructions.map(rec => {
-            if (rec.reconstruction_id !== reconstructionId) return rec;
-            const newGroup: Group = {
-              group_id: `group-${Date.now()}`,
-              name: groupName,
-              contributions: [],
-              model: null,
-              status: 'success'         // langsung sukses
-            };
-            return {
-              ...rec,
-              groups: [...rec.groups, newGroup],
-              status: 'created'         // ubah status reconstruction
-            };
-          })
-        }));
-      },
+      addGroup: async (reconstructionId, groupName): Promise<ReconstructionMetadata> => {
+        const state = get();
+        const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
+        if (!rec) throw new Error('Reconstruction not found');
 
-      removeGroup: (reconstructionId, groupId) => {
-        set(state => ({
-          reconstructions: state.reconstructions.map(rec => {
-            if (rec.reconstruction_id !== reconstructionId) return rec;
-            return { ...rec, groups: rec.groups.filter(g => g.group_id !== groupId) };
-          })
-        }));
-      },
+        const newGroupId = `group-${Date.now()}`;
+        const newGroup: Group = {
+          group_id:    newGroupId,
+          name:        groupName,
+          model:       null,
+          status:      'success',
+          contributions: []
+        };
 
-      addContributionsToGroup: (reconstructionId, groupId, contributions) => {
-        set(state => ({
-          reconstructions: state.reconstructions.map(rec => {
-            if (rec.reconstruction_id !== reconstructionId) return rec;
-          
-            return {
-              ...rec,
-              groups: rec.groups.map(g => {
-                // 1) Jika ini group target, tambahkan kontribusi yg belum ada
-                if (g.group_id === groupId) {
-                  const merged = [
-                    ...g.contributions,
-                    ...contributions.filter(
-                      c => !g.contributions.some(x => x.contribution_id === c.contribution_id)
-                    )
-                  ];
-                  return { ...g, contributions: merged };
-                }
-                // 2) Selain itu (group lain), pastikan kontribusi ini dikeluarkan
-                const filtered = g.contributions.filter(
-                  c => !contributions.some(x => x.contribution_id === c.contribution_id)
-                );
-                return { ...g, contributions: filtered };
-              })
-            };
-          })
+        // 1) Beri tahu TS bahwa ini adalah ReconstructionMetadata
+        const updatedRec: ReconstructionMetadata = {
+          ...rec,
+          groups: [...rec.groups, newGroup],
+          status: 'created'
+        };
 
-        }));
-        return true;
-      },
-
-      updateGroupName: (reconstructionId, groupId, newName) => {
-        set(state => ({
-          reconstructions: state.reconstructions.map(rec => {
-            if (rec.reconstruction_id !== reconstructionId) return rec;
-            return {
-              ...rec,
-              groups: rec.groups.map(g => 
-                g.group_id === groupId ? { ...g, name: newName } : g
-              )
-            };
-          })
-        }));
-      },
-      setGroups: (reconstructionId, groups) =>
-        set((state) => ({
-          reconstructions: state.reconstructions.map((rec) =>
-            rec.reconstruction_id === reconstructionId
-              ? { ...rec, groups }
-              : rec
+        set(s => ({
+          reconstructions: s.reconstructions.map(r =>
+            r.reconstruction_id === reconstructionId ? updatedRec : r
           )
-        })),
-      // New function: Move contributions between groups
-      moveContributionsBetweenGroups: (reconstructionId, sourceGroupId, targetGroupId, contributionIds) => {
-        set(state => ({
-          reconstructions: state.reconstructions.map(rec => {
-            if (rec.reconstruction_id !== reconstructionId) return rec;
-            
-            // Find contributions to move
-            const sourceGroup = rec.groups.find(g => g.group_id === sourceGroupId);
-            if (!sourceGroup) return rec;
-            
-            const contributionsToMove = sourceGroup.contributions.filter(c => 
-              contributionIds.includes(c.contribution_id)
-            );
-            
-            if (contributionsToMove.length === 0) return rec;
-            
-            return {
-              ...rec,
-              groups: rec.groups.map(g => {
-                if (g.group_id === sourceGroupId) {
-                  // Remove from source group
-                  return {
-                    ...g,
-                    contributions: g.contributions.filter(c => 
-                      !contributionIds.includes(c.contribution_id)
-                    )}
-                } else if (g.group_id === targetGroupId) {
-                  // Add to target group (only if not already present)
-                  const existingIds = new Set(g.contributions.map(c => c.contribution_id));
-                  const newContributions = contributionsToMove.filter(c => 
-                    !existingIds.has(c.contribution_id)
-                  );
-                  return {
-                    ...g,
-                    contributions: [...g.contributions, ...newContributions]
-                  };
-                }
-                return g;
-              })
-            };
-          })
         }));
+
+        try {
+          const res = await fetch(`${apiRecons}/${reconstructionId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedRec),
+          });
+          if (!res.ok) throw new Error('API failed');
+          console.log('update rec with add group');
+          
+        } catch (e) {
+          console.error(e);
+        }
+
+        return updatedRec;  // sekarang cocok dengan Promise<ReconstructionMetadata>
       },
+
+     removeGroup: async (
+        reconstructionId: string,
+        groupId: string
+      ): Promise<ReconstructionMetadata> => {
+        const state = get();
+        const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
+        if (!rec) throw new Error('Reconstruction not found');
+
+        // 1) Hitung updatedRec
+        const updatedRec: ReconstructionMetadata = {
+          ...rec,
+          groups: rec.groups.filter(g => g.group_id !== groupId),
+          status: 'created'
+        };
+
+        // 2) Update state lokal
+        set(s => ({
+          reconstructions: s.reconstructions.map(r =>
+            r.reconstruction_id === reconstructionId ? updatedRec : r
+          )
+        }));
+
+        // 3) Sinkron ke API
+        return syncRecToApi(updatedRec);
+      },
+
+
+      addContributionsToGroup: async (
+          reconstructionId: string,
+          groupId: string,
+          contributions: Contribution[]
+        ): Promise<ReconstructionMetadata> => {
+          const state = get();
+          const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
+          if (!rec) throw new Error('Reconstruction not found');
+
+          const updatedGroups = rec.groups.map(g => {
+            if (g.group_id === groupId) {
+              // merge baru
+              const merged = [
+                ...g.contributions,
+                ...contributions.filter(c => !g.contributions.some(x => x.contribution_id === c.contribution_id))
+              ];
+              return { ...g, contributions: merged };
+            }
+            // hapus jika di-group lain
+            const filtered = g.contributions.filter(c =>
+              !contributions.some(x => x.contribution_id === c.contribution_id)
+            );
+            return { ...g, contributions: filtered };
+          });
+
+          const updatedRec: ReconstructionMetadata = {
+            ...rec,
+            groups: updatedGroups,
+            status: 'created'
+          };
+
+          set(s => ({
+            reconstructions: s.reconstructions.map(r =>
+              r.reconstruction_id === reconstructionId ? updatedRec : r
+            )
+          }));
+
+          return syncRecToApi(updatedRec);
+        },
+
+
+      updateGroupName: async (
+        reconstructionId: string,
+        groupId: string,
+        newName: string
+      ): Promise<ReconstructionMetadata> => {
+        const state = get();
+        const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
+        if (!rec) throw new Error('Reconstruction not found');
+
+        const updatedRec: ReconstructionMetadata = {
+          ...rec,
+          groups: rec.groups.map(g =>
+            g.group_id === groupId ? { ...g, name: newName } : g
+          ),
+          status: 'created'
+        };
+
+        set(s => ({
+          reconstructions: s.reconstructions.map(r =>
+            r.reconstruction_id === reconstructionId ? updatedRec : r
+          )
+        }));
+
+        return syncRecToApi(updatedRec);
+      },
+
+      setGroups: async (
+        reconstructionId: string,
+        groups: Group[]
+      ): Promise<ReconstructionMetadata> => {
+        const state = get();
+        const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
+        if (!rec) throw new Error('Reconstruction not found');
+
+        const updatedRec: ReconstructionMetadata = {
+          ...rec,
+          groups,
+          status: 'created'
+        };
+
+        set(s => ({
+          reconstructions: s.reconstructions.map(r =>
+            r.reconstruction_id === reconstructionId ? updatedRec : r
+          )
+        }));
+
+        return syncRecToApi(updatedRec);
+      },
+
+      // New function: Move contributions between groups
+      moveContributionsBetweenGroups: async (
+        reconstructionId: string,
+        sourceGroupId: string,
+        targetGroupId: string,
+        contributionIds: number[]
+      ): Promise<ReconstructionMetadata> => {
+        const state = get();
+        const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
+        if (!rec) throw new Error('Reconstruction not found');
+
+        // hitung baru seperti sebelumnya…
+        const sourceGroup = rec.groups.find(g => g.group_id === sourceGroupId);
+        const contributionsToMove = sourceGroup
+          ? sourceGroup.contributions.filter(c => contributionIds.includes(c.contribution_id))
+          : [];
+
+        if (contributionsToMove.length === 0) return rec;
+
+        const updatedGroups = rec.groups.map(g => {
+          if (g.group_id === sourceGroupId) {
+            return {
+              ...g,
+              contributions: g.contributions.filter(c => !contributionIds.includes(c.contribution_id))
+            };
+          } else if (g.group_id === targetGroupId) {
+            const existingIds = new Set(g.contributions.map(c => c.contribution_id));
+            const toAdd = contributionsToMove.filter(c => !existingIds.has(c.contribution_id));
+            return { ...g, contributions: [...g.contributions, ...toAdd] };
+          }
+          return g;
+        });
+
+        const updatedRec: ReconstructionMetadata = {
+          ...rec,
+          groups: updatedGroups,
+          status: 'created'
+        };
+
+        set(s => ({
+          reconstructions: s.reconstructions.map(r =>
+            r.reconstruction_id === reconstructionId ? updatedRec : r
+          )
+        }));
+
+        return syncRecToApi(updatedRec);
+      },
+
+
+      // Additional functions we've added
+      addGroupWithContributions: async (
+        reconstructionId: string,
+        groupId: string,
+        groupName: string,
+        contributions: Contribution[]
+      ): Promise<ReconstructionMetadata> => {
+        const state = get();
+        const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
+        if (!rec) throw new Error('Reconstruction not found');
+
+        const newGroup: Group = {
+          group_id:      groupId,
+          name:          groupName,
+          contributions,
+          model:         null,
+          status:        'success'
+        };
+
+        const updatedRec: ReconstructionMetadata = {
+          ...rec,
+          groups: [...rec.groups, newGroup],
+          status: 'created'
+        };
+
+        set(s => ({
+          reconstructions: s.reconstructions.map(r =>
+            r.reconstruction_id === reconstructionId ? updatedRec : r
+          )
+        }));
+
+        return syncRecToApi(updatedRec);
+      },
+
+      
+      mergeGroups: async (
+        reconstructionId: string,
+        groupIds: string[],
+        newGroupName: string
+      ): Promise<ReconstructionMetadata> => {
+        const state = get();
+        const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
+        if (!rec) throw new Error('Reconstruction not found');
+
+        // kumpulkan kontribusi dari grup yang di-merge
+        const contributionsToMerge: Contribution[] = [];
+        const groupsToKeep: Group[] = [];
+
+        rec.groups.forEach(g => {
+          if (groupIds.includes(g.group_id)) {
+            contributionsToMerge.push(...g.contributions);
+          } else {
+            groupsToKeep.push(g);
+          }
+        });
+
+        const newGroup: Group = {
+          group_id:      `group-${Date.now()}-${reconstructionId}`,
+          name:          newGroupName,
+          contributions: contributionsToMerge,
+          model:         null,
+          status:        'success'
+        };
+
+        const updatedRec: ReconstructionMetadata = {
+          ...rec,
+          groups: [...groupsToKeep, newGroup],
+          status: 'created'
+        };
+
+        set(s => ({
+          reconstructions: s.reconstructions.map(r =>
+            r.reconstruction_id === reconstructionId ? updatedRec : r
+          )
+        }));
+
+        return syncRecToApi(updatedRec);
+      },
+
+      
+      removeContributionsFromGroup: async (
+        reconstructionId: string,
+        groupId: string,
+        contributions: Contribution[]
+      ): Promise<ReconstructionMetadata> => {
+        const state = get();
+        const rec = state.reconstructions.find(r => r.reconstruction_id === reconstructionId);
+        if (!rec) throw new Error('Reconstruction not found');
+
+        const updatedGroups = rec.groups.map(g => {
+          if (g.group_id !== groupId) return g;
+          const filtered = g.contributions.filter(
+            c => !contributions.some(cont => cont.contribution_id === c.contribution_id)
+          );
+          return { ...g, contributions: filtered };
+        });
+
+        const updatedRec: ReconstructionMetadata = {
+          ...rec,
+          groups: updatedGroups,
+          status: 'created'
+        };
+
+        set(s => ({
+          reconstructions: s.reconstructions.map(r =>
+            r.reconstruction_id === reconstructionId ? updatedRec : r
+          )
+        }));
+
+        return syncRecToApi(updatedRec);
+      },
+
 
       // New function: Bulk update contributions
       bulkUpdateContributions: (reconstructionId, updates) => {
@@ -530,83 +970,7 @@ const useReconstructionStore = create<ReconstructionState>()(
         }));
       },
       
-      // Additional functions we've added
-      addGroupWithContributions: (reconstructionId, groupId, groupName, contributions) => {
-        set(state => ({
-          reconstructions: state.reconstructions.map(rec => {
-            if (rec.reconstruction_id !== reconstructionId) return rec;
-            
-            const newGroup: Group = {
-              group_id: groupId,
-              name: groupName,
-              contributions: contributions,
-              model: null,
-              status: 'success'
-            };
-            
-            return {
-              ...rec,
-              groups: [...rec.groups, newGroup],
-              status: 'created'
-            };
-          })
-        }));
-      },
       
-      mergeGroups: (reconstructionId, groupIds, newGroupName) => {
-        set(state => ({
-          reconstructions: state.reconstructions.map(rec => {
-            if (rec.reconstruction_id !== reconstructionId) return rec;
-            
-            // Kumpulkan semua kontribusi dari grup yang akan di-merge
-            const contributionsToMerge: Contribution[] = [];
-            const groupsToKeep: Group[] = [];
-            
-            rec.groups.forEach(group => {
-              if (groupIds.includes(group.group_id)) {
-                contributionsToMerge.push(...group.contributions);
-              } else {
-                groupsToKeep.push(group);
-              }
-            });
-            
-            // Buat grup baru
-            const newGroup: Group = {
-              group_id: `group-${Date.now()}-${rec.reconstruction_id}`,
-              name: newGroupName,
-              contributions: contributionsToMerge,
-              model: null,
-              status: 'success'
-            };
-            
-            return {
-              ...rec,
-              groups: [...groupsToKeep, newGroup]
-            };
-          })
-        }));
-      },
-      
-      removeContributionsFromGroup: (reconstructionId, groupId, contributions) => {
-        set(state => ({
-          reconstructions: state.reconstructions.map(rec => {
-            if (rec.reconstruction_id !== reconstructionId) return rec;
-            
-            return {
-              ...rec,
-              groups: rec.groups.map(g => {
-                if (g.group_id === groupId) {
-                  const newContributions = g.contributions.filter(
-                    c => !contributions.some(cont => cont.contribution_id === c.contribution_id)
-                  );
-                  return { ...g, contributions: newContributions };
-                }
-                return g;
-              })
-            };
-          })
-        }));
-      }
     }),
     {
       name: 'reconstruction-store',

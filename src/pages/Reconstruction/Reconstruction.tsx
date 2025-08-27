@@ -16,7 +16,8 @@ import {
   Checkbox,
   message,
   Select,
-  DatePicker
+  DatePicker,
+  UploadFile
 } from 'antd';
 import {
   CloudDownloadOutlined,
@@ -35,6 +36,7 @@ import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
 import moment, { Moment } from 'moment';
 import dayjs, { Dayjs } from 'dayjs';
+import FileUploadModel from '../../components/Reconstruction/FileUploadModel';
 
 interface ReconstructionProps {
   reconstructionId: string;
@@ -53,9 +55,11 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
  
 
  
-   const [filterDate, setFilterDate] = useState<Dayjs | null>(dayjs());
+  const [filterDate, setFilterDate] = useState<Dayjs | null>(dayjs());
   const reconStore = useReconstructionStore();
   const [selectedRecons, setSelectedRecons] = useState<string[]>([]);
+  const [uploadModalVisible, setUploadModalVisible] = useState(false);
+  const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
    
    
   // Load global configs
@@ -77,6 +81,7 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
 
   const [activeTab, setActiveTab] = useState<'1' | 'grouping' | 'configuration'>('1');
   const [activeReconstruction, setActiveReconstruction] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   // State for create reconstruction flow
   const [createModalVisible, setCreateModalVisible] = useState(false);
@@ -118,60 +123,79 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
 
  const dteParam = filterDate?.format('YYYYMMDD') ?? '';
 
-useEffect(() => {
-  const fetchRecons = async () => {
-    if (!filterDate) {
-      reconStore.setReconstructions([]);
-      return;
-    }
-    const dateParam = filterDate.format('YYYYMMDD');
-
-    try {
-      const res = await fetch(`${apiRecons}?date=${dateParam}`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const payload = await res.json() as {
-        error?: string;
-        datas?: ReconstructionMetadata[];
-      };
-      console.log('payload:', payload);
-
-      // 1) Tangani error dari server
-      if (payload.error) {
-        message.error(payload.error);
+  useEffect(() => {
+    const fetchRecons = async () => {
+      if (!filterDate) {
         reconStore.setReconstructions([]);
         return;
       }
+      const month = filterDate.format('YYYYMM');
 
-      // 2) Pakai array kosong kalau datas tidak ada
-      const datas = payload.datas ?? [];
+      
 
-      // 3) Mapping dengan default untuk groups & contributions
-      const mappedData = datas.map(rec => ({
-        ...rec,
-        contributions: rec.contributions ?? [],
-        groups: (rec.groups ?? []).map(group => ({
-          ...group,
-          contributions: (group.contributions ?? []).map(contrib => ({
-            ...contrib,
-            category: contrib.category ?? 'other',
-            temple_id: contrib.temple_id ?? 0,
-            privacy_setting: contrib.privacy_setting ?? 'public'
+      // Ambil token dari localStorage
+      let token: string | null = null;
+      try {
+        const authRaw = localStorage.getItem('auth-storage');
+        if (authRaw) {
+          const auth = JSON.parse(authRaw);
+          token = auth.state?.token ?? null;
+        }
+      } catch {
+        token = null;
+      }
+
+      // Siapkan headers, sertakan Authorization kalau ada token
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      try {
+        const res = await fetch(`${apiRecons}?month=${month}`, {
+          method: 'GET',
+          headers,
+        });
+        const payload = await res.json() as {
+          error?: string;
+          datas?: ReconstructionMetadata[];
+        };
+        console.log('payload:', payload);
+
+        if (payload.error) {
+          message.error(payload.error);
+          reconStore.setReconstructions([]);
+          return;
+        }
+
+        const datas = payload.datas ?? [];
+        const mappedData = datas.map(rec => ({
+          ...rec,
+          contributions: rec.contributions ?? [],
+          groups: (rec.groups ?? []).map(group => ({
+            ...group,
+            contributions: (group.contributions ?? []).map(contrib => ({
+              ...contrib,
+              category: contrib.category ?? 'other',
+              temple_id: contrib.temple_id ?? 0,
+              privacy_setting: contrib.privacy_setting ?? 'public'
+            }))
           }))
-        }))
-      }));
+        }));
 
-      reconStore.setReconstructions(mappedData);
-    } catch (err) {
-      console.error('Failed to fetch reconstructions:', err);
-      message.error('Failed to load reconstructions for date');
-      reconStore.setReconstructions([]);
-    }
-  };
+        reconStore.setReconstructions(mappedData);
+      } catch (err) {
+        console.error('Failed to fetch reconstructions:', err);
+        message.error('Failed to load reconstructions for date');
+        reconStore.setReconstructions([]);
+      }
+    };
 
-  fetchRecons();
-}, [filterDate]);
+    fetchRecons();
+  }, [filterDate]);
+
 
 
 
@@ -187,7 +211,7 @@ useEffect(() => {
   }
 }, [activeTab, rec, configs]); // Tambahkan configs sebagai dependency
 
-   const handleConfigSubmit = async () => {
+  const handleConfigSubmit = async () => {
       if (!rec) {
         message.error('Reconstruction tidak ditemukan');
         return;
@@ -226,43 +250,73 @@ useEffect(() => {
           showConfirmButton: false
         });
       }
+    
     };
 
   
-    // Fungsi untuk unduh satu reconstruction
-    const handleDownload = async (rec: any) => {
-      const dateParam = filterDate?.format('YYYYMMDD');
+   // Helper: ambil JWT token dari localStorage
+  const getAuthToken = (): string | null => {
+    try {
+      const raw = localStorage.getItem('auth-storage');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed.state?.token ?? null;
+    } catch {
+      console.warn('Failed to parse auth-storage');
+      return null;
+    }
+  };
 
-      try {
-        const res = await fetch(`${apiRecons}/download/${rec.reconstruction_id}?date=${dateParam}`);
-        const data = await res.json();
-        
-        // Buat file download
-        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `reconstruction_${rec.reconstruction_id}.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.error('Download failed:', err);
-        message.error('Failed to download reconstruction');
-      }
-    };
+  // Fungsi untuk unduh satu reconstruction
+  const handleDownload = async (rec: any) => {
+    const dateParam = filterDate?.format('YYYYMM');
+    const token = getAuthToken();
+
+    const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    try {
+      const res = await fetch(
+        `${apiRecons}/download/${rec.reconstruction_id}?month=${dateParam}`,
+        { headers }
+      );
+      if (!res.ok) throw new Error(`Status ${res.status}`);
+      const data = await res.json();
+
+      // Trigger download
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `reconstruction_${rec.reconstruction_id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download failed:', err);
+      message.error('Failed to download reconstruction');
+    }
+  };
 
   // Fungsi untuk unduh semua berdasarkan tanggal
   const handleDownloadAllByDate = async () => {
     if (!filterDate) return;
-    
+    const dateParam = filterDate.format('YYYYMM');
+    const token = getAuthToken();
+
+    const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     try {
-      const dateParam = filterDate.format('YYYYMMDD');
-      const res = await fetch(`${apiRecons}/download?date=${dateParam}`);
+      const res = await fetch(
+        `${apiRecons}/download?month=${dateParam}`,
+        { headers }
+      );
+      if (!res.ok) throw new Error(`Status ${res.status}`);
       const data = await res.json();
-      
-      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -277,53 +331,47 @@ useEffect(() => {
     }
   };
 
-   // Handle batch download of selected
+  // Handle batch download of selected reconstructions
   const handleDownloadSelected = async () => {
-  const dateParam = filterDate?.format('YYYYMMDD');
-  if (!filterDate || selectedRecons.length === 0) return;
-    console.log(selectedRecons);
-    
-  try {
-    // 1) Kirim POST dengan JSON body { ids: [...] }
-    const res = await fetch(
-      `${apiRecons}/download/multiple?date=${dateParam}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selectedRecons }),
+    if (!filterDate || selectedRecons.length === 0) return;
+    const dateParam = filterDate.format('YYYYMM');
+    const token = getAuthToken();
+
+    const headers: Record<string,string> = {
+      'Content-Type': 'application/json'
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    try {
+      const res = await fetch(
+        `${apiRecons}/download/multiple?month=${dateParam}`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ids: selectedRecons }),
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Status ${res.status}`);
       }
-    );
+      const data: ReconstructionMetadata[] = await res.json();
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || 'Failed to fetch selected data');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `selected_reconstructions_${dateParam}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('Download failed:', err);
+      message.error(err.message || 'Failed to download selected reconstructions');
     }
+  };
 
-    // 2) Ambil response (diasumsikan sudah array ReconstructionMetadata[])
-    const data: ReconstructionMetadata[] = await res.json();
-    console.log('Downloaded selected:', data);
-
-    // 3) Buat dan trigger download
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `selected_reconstructions_${dateParam}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  } catch (err: any) {
-    console.error('Download failed:', err);
-    message.error(err.message || 'Failed to download selected reconstructions');
-  }
-};
-
-
-
-  
 
 
   const toggleSelectRecon = (id: string) => {
@@ -336,23 +384,23 @@ useEffect(() => {
 
   const reconstructionsToShow = reconStore.reconstructions;
   // Debounce untuk pencarian temple
-  useEffect(() => {
-    if (searchTimeout) {
-      window.clearTimeout(searchTimeout);
-    }
+  // useEffect(() => {
+  //   if (searchTimeout) {
+  //     window.clearTimeout(searchTimeout);
+  //   }
 
-    const timeout = window.setTimeout(() => {
-      setDebouncedTempleSearchText(templeSearchText);
-    }, 300); // 300ms debounce time
+  //   const timeout = window.setTimeout(() => {
+  //     setDebouncedTempleSearchText(templeSearchText);
+  //   }, 300); // 300ms debounce time
 
-    setSearchTimeout(timeout);
+  //   setSearchTimeout(timeout);
 
-    return () => {
-      if (searchTimeout) {
-        window.clearTimeout(searchTimeout);
-      }
-    };
-  }, [templeSearchText]);
+  //   return () => {
+  //     if (searchTimeout) {
+  //       window.clearTimeout(searchTimeout);
+  //     }
+  //   };
+  // }, [templeSearchText]);
 
   // Fetch temples with pagination
   useEffect(() => {
@@ -361,7 +409,8 @@ useEffect(() => {
     const load = async () => {
       try {
         setLoadingTemples(true);
-        await templeStore.fetchTemples(templePage, debouncedTempleSearchText);
+        // Gunakan templePage dan templeSearchText langsung
+        await templeStore.fetchTemples(templePage, templeSearchText);
       } catch {
         message.error('Failed to fetch temples');
       } finally {
@@ -370,7 +419,7 @@ useEffect(() => {
     };
 
     load();
-  }, [createModalVisible, templePage, debouncedTempleSearchText]);
+  }, [createModalVisible, templePage, templeSearchText]); // Gunakan templeSearchText
 
   // Reset state when create modal opens
   useEffect(() => {
@@ -387,7 +436,7 @@ useEffect(() => {
   }, [createModalVisible]);
 
 
-
+  
 
   // Fetch contributions for add contributions modal
   useEffect(() => {
@@ -461,6 +510,40 @@ useEffect(() => {
       }
     };
   }, [handleCreateObserver]);
+
+  // const handleUploadFiles = async (files: {
+  //   model_files: UploadFile[];
+  //   log?: UploadFile;
+  //   eval?: UploadFile;
+  //   nerfstudio_data?: UploadFile;
+  //   nerfstudio_model?: UploadFile;
+  // }) => {
+  //   if (!rec || !currentGroupId) return;
+    
+  //   setUploading(true);
+  //   try {
+  //     const dateParam = filterDate?.format('YYYYMMDD') ?? '';
+  //     const success = await reconStore.uploadGroupModel(
+  //       rec.reconstruction_id,
+  //       currentGroupId,
+  //       '',
+  //       files,
+  //       dateParam
+  //     );
+      
+  //     if (success) {
+  //       message.success('Files uploaded successfully');
+  //       setUploadModalVisible(false);
+  //     } else {
+  //       message.error('Failed to upload files');
+  //     }
+  //   } catch (error) {
+  //     console.error('Upload error:', error);
+  //     message.error('Failed to upload files');
+  //   } finally {
+  //     setUploading(false);
+  //   }
+  // };
 
   // Efek untuk mengambil kontribusi dari semua temple terpilih
 // useEffect(() => {
@@ -626,7 +709,7 @@ const handleSave = async () => {
       console.log(user);
       
         // // Buat satu reconstruction untuk semua temple
-      const newRec = reconStore.addReconstruction(
+      const newRec = await reconStore.addReconstruction(
         label,
         user.id,
         selectedTempleIds
@@ -708,11 +791,11 @@ const handleSave = async () => {
   //   setAddContribSelectedIds([]);
   // };
 
-  // // Handle temple search
-  // const handleTempleSearch = (value: string) => {
-  //   setTempleSearchText(value);
-  //   setTemplePage(1);
-  // };
+  // Handle temple search
+  const handleTempleSearch = (value: string) => {
+    setTemplePage(1); // Reset ke halaman pertama
+    setTempleSearchText(value);
+  };
 
   // Handle temple selection
  const handleTempleSelect = (id: number) => {
@@ -772,6 +855,9 @@ const handleSave = async () => {
    // Disable config tab if no groups
   // Menjadi:
     const configDisabled = !rec || rec.groups.length === 0 || rec.status !== 'ready';
+    const isReady       = rec?.status === 'ready';
+    const deleteDisabled = !rec || isReady;
+    
       
   return (
     <>
@@ -786,8 +872,8 @@ const handleSave = async () => {
           <TabPane tab="Reconstructions" key="1">
               <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                 {/* <Button onClick={() => setFilterDate(moment())}>Today</Button> */}
-                <Text style={{ marginTop: '4px' }}>Date :</Text>
-                <DatePicker value={filterDate} onChange={setFilterDate} allowClear />
+                <Text style={{ marginTop: '4px' }}>Month :</Text>
+                <DatePicker value={filterDate} onChange={setFilterDate} allowClear format="MMMM YYYY" picker="month"/>
                {reconstructionsToShow.length === 0 ? (
                   <Button
                     type="default"
@@ -860,11 +946,23 @@ const handleSave = async () => {
                               Status: {rec.status}
                             </Tag>
                             <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                            <Tag color="blue">
-                                    {totalContribs} contributions
+                                {/* Always show staged count, dim if status ready */}
+                                <Tag color={rec.status === 'ready' ? 'default' : 'blue'}>
+                                  {rec.contributions.length} contributions staged
+                                </Tag>
+
+                                {/* Show grouped only when ready */}
+                                {rec.status === 'ready' && (
+                                  <Tag color="green">
+                                    {totalContribs} contributions grouped
                                   </Tag>
-                              <Tag color="green">{rec.groups.length} groups</Tag>
-                            </div>
+                                )}
+
+                                <Tag color="orange">
+                                  {rec.groups.length} groups
+                                </Tag>
+                              </div>
+
                           </div>
                         }
                       />
@@ -894,11 +992,20 @@ const handleSave = async () => {
 
                             <Popconfirm
                               title="Yakin mau hapus?"
-                              onConfirm={() => reconStore.removeReconstruction(rec.reconstruction_id,dteParam)}
-                              okText="Ya"
-                              cancelText="Tidak"
+                              onConfirm={() =>
+                                reconStore.removeReconstruction(
+                                  rec.reconstruction_id,
+                                  filterDate?.format("YYYYMM")!
+                                )
+                              }
+                              disabled={rec.status === "ready"} // langsung boolean
                             >
-                              <Button type="link" icon={<DeleteOutlined />} danger>
+                              <Button
+                                type="link"
+                                icon={<DeleteOutlined />}
+                                danger
+                                disabled={rec.status === "ready"} // langsung boolean
+                              >
                                 Delete
                               </Button>
                             </Popconfirm>
@@ -913,15 +1020,16 @@ const handleSave = async () => {
               />
               ):(
                 <div style={{ padding: 48, textAlign: 'center' }}>
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={
-                    filterDate
-                      ? `Tidak ada reconstruction pada ${filterDate.format('DD MMM YYYY')}`
-                      : 'Pilih tanggal terlebih dahulu'
-                  }
-                />
-              </div>
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={
+                        filterDate
+                          ? `No reconstructions on ${filterDate.format('MMM YYYY')}`
+                          : 'Please select a date first'
+                      }
+                    />
+                  </div>
+
               )}
         </TabPane>
 
@@ -936,6 +1044,7 @@ const handleSave = async () => {
                   setActiveTab('1');
                 }}
                 onGoToConfiguration={() => setActiveTab('configuration')}
+                reconstructionStatus={rec?.status}
               />
             ) : (
               <Card style={{ textAlign: 'center' }}>
@@ -1028,13 +1137,14 @@ const handleSave = async () => {
 
           <Form.Item label="Select Temples" >
             <Input.Search
-              placeholder="Search temples"
-              value={templeSearchText}
-              onChange={(e) => setTempleSearchText(e.target.value)}
-              enterButton
-              loading={loadingTemples}
-              style={{ marginBottom: 16 }}
-            />
+                placeholder="Search temples"
+                value={templeSearchText}
+                onChange={(e) => setTempleSearchText(e.target.value)}
+                onSearch={handleTempleSearch} // Tambahkan ini
+                enterButton
+                loading={loadingTemples}
+                style={{ marginBottom: 16 }}
+              />
             
             {loadingTemples ? (
               <div style={{ textAlign: 'center', padding: 24 }}>

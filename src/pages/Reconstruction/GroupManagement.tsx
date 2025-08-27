@@ -16,7 +16,10 @@ import {
   Divider,
   List as AntList,
   message,
-  
+  Upload,
+  UploadProps,
+  UploadFile,
+  Tooltip
 } from 'antd';
 import { 
   PlusOutlined, 
@@ -30,14 +33,17 @@ import {
   ArrowDownOutlined,
   EyeOutlined,
   LinkOutlined,
-  DisconnectOutlined
+  DisconnectOutlined,
+  UploadOutlined,
+  CloudUploadOutlined
 } from '@ant-design/icons';
 import useReconstructionStore from '../../store/useReconstructionStore';
 import styles from './GroupManagement.module.css';
 import { FixedSizeList as List } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
-import { Moment } from 'moment';
 import { Dayjs } from 'dayjs';
+import { RcFile } from 'antd/es/upload';
+import 'antd/dist/reset.css';
 
 const { Title, Text } = Typography;
 const { Search } = Input;
@@ -45,11 +51,11 @@ const { Option } = Select;
 
 interface GroupManagementProps {
   reconstructionId: string;
-  filterDate: Dayjs | null; // Tambahkan ini
+  filterDate: Dayjs | null;
   onBack: () => void;
   onGoToConfiguration: () => void;
+  reconstructionStatus: string | undefined; 
 }
-
 
 interface Contribution {
   contribution_id: number;
@@ -66,6 +72,8 @@ interface Group {
   group_id: string;
   name: string;
   contributions: Contribution[];
+  model: string | { model_id: string; [key: string]: any } | null;
+  status: 'pending' | 'processing' | 'success' | 'failed';
 }
 
 interface DragItem {
@@ -91,10 +99,17 @@ interface ViewingGroup {
   contributions: Contribution[];
 }
 
-const CONTRIB_ITEM_HEIGHT = 100; // Increased height for more details
-const GROUP_ITEM_HEIGHT = 320;
+interface FileUploadState {
+  model_files?: UploadFile[];
+  log?: UploadFile;
+  eval?: UploadFile;
+  nerfstudio_data?: UploadFile;
+  nerfstudio_model?: UploadFile;
+}
 
-// Enhanced Contribution Item with more details and view button
+const CONTRIB_ITEM_HEIGHT = 100;
+const GROUP_ITEM_HEIGHT = 400;
+
 const ContribItem = React.memo(({ 
   c, 
   selectedContribs, 
@@ -145,9 +160,6 @@ const ContribItem = React.memo(({
           <Text strong ellipsis={{ tooltip: c.contribution_name }} style={{ fontSize: 14 }}>
             {c.contribution_name}
           </Text>
-          {/* <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-            ID: {c.contribution_id}
-          </Text> */}
         </div>
         
         <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -168,8 +180,6 @@ const ContribItem = React.memo(({
             </Tag>
           )}
         </div>
-
-
       </div>
       
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -181,8 +191,12 @@ const ContribItem = React.memo(({
             if (groupId) {
               const item = recon?.contributions.find((cont: Contribution) => cont.contribution_id === c.contribution_id);
               if (item) {
-                addContributionsToGroup(reconstructionId, groupId, [item]);
-                message.success(`Contribution moved to group`);
+                try {
+                  addContributionsToGroup(reconstructionId, groupId, [item]);
+                  message.success(`Contribution moved to group`);
+                } catch (error) {
+                  message.error('Failed to move contribution: ' + (error as Error).message);
+                }
               }
             }
           }}
@@ -194,11 +208,10 @@ const ContribItem = React.memo(({
           ))}
         </Select>
         
-        
         <Button
           size="small"
           onClick={() => onViewDetail(c)}
-          style={{ marginLeft: 4,color:'grey' }}
+          style={{ marginLeft: 4, color: 'grey' }}
         >
           View <EyeOutlined />
         </Button>
@@ -207,7 +220,6 @@ const ContribItem = React.memo(({
   );
 });
 
-// Group Item component
 const GroupItem = React.memo(({ 
   g,
   selectedGroups,
@@ -222,7 +234,10 @@ const GroupItem = React.memo(({
   setViewingGroup,
   reconstructionId,
   handleDrop,
-  style
+  style,
+  onUploadModel,
+  reconstructionStatus,
+  recon
 }: {
   g: Group;
   selectedGroups: string[];
@@ -238,9 +253,13 @@ const GroupItem = React.memo(({
   reconstructionId: string;
   handleDrop: (e: React.DragEvent, groupId: string) => void;
   style: React.CSSProperties;
+  onUploadModel: (groupId: string) => void;
+  reconstructionStatus: string | undefined; 
+  recon:any
 }) => {
   const inputRef = useRef<any>(null);
   const isEditing = editingGroup?.id === g.group_id;
+  const [isModalVisible, setIsModalVisible] = useState(false);
   
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -248,16 +267,94 @@ const GroupItem = React.memo(({
     }
   }, [isEditing]);
 
+   // Fungsi untuk menutup modal
+  const closeModalDetail = useCallback(() => {
+    setIsModalVisible(false);
+  },[]);
+
+  // Fungsi untuk mendapatkan nama kontribusi
+  const getContributionName = (contributionId: number): string => {
+    if (!recon?.contributions) return `Contribution ${contributionId}`;
+    
+    const contribution = recon.contributions.find(
+      (c: any) => c.contribution_id === contributionId
+    );
+    
+    return contribution?.contribution_name || `Contribution ${contributionId}`;
+  };
+
   return (
-    <div style={{ ...style, padding: 12 }}  data-group-id={g.group_id}> 
-      <Card
+    <div 
+      style={{ 
+        ...style, 
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        cursor: 'pointer',
+        position: 'relative',
+        border: selectedGroups.includes(g.group_id) ? '2px solid #1890ff' : '1px solid #e0e0e0',
+        backgroundColor: selectedGroups.includes(g.group_id) ? '#e6f7ff' : '#fff',
+      }}
+      data-group-id={g.group_id}
+      onClick={(e) => {
+        // Hanya buka modal jika tidak mengklik checkbox
+        if (!(e.target instanceof HTMLInputElement)) {
+          setIsModalVisible(true);
+        }
+      }}
+      onDrop={e => {
+        e.preventDefault();
+        handleDrop(e, g.group_id);
+        e.currentTarget.closest('[data-group-id]')?.removeAttribute('data-drag-over');
+      }}
+      onDragOver={e => {
+        e.preventDefault();
+        e.currentTarget.closest('[data-group-id]')?.setAttribute('data-drag-over', 'true');
+      }}
+      onDragLeave={e => {
+        e.currentTarget.closest('[data-group-id]')?.removeAttribute('data-drag-over');
+      }}
+    >
+      {/* Checkbox untuk seleksi group */}
+      <Checkbox
+        checked={selectedGroups.includes(g.group_id)}
+        onChange={(e) => {
+          e.stopPropagation();
+          toggleSelectGroup(g.group_id);
+        }}
+        style={{ position: 'absolute', top: 8, left: 8, zIndex: 1 }}
+      />
+      
+      {/* Folder Icon */}
+      <FolderOutlined style={{ fontSize: 48, color: '#1890ff' }} />
+      
+      {/* Nama Group */}
+      <Text 
+        strong 
+        ellipsis={{ tooltip: g.name }} 
+        style={{ marginTop: 8, textAlign: 'center', maxWidth: '100%' }}
+      >
+        {g.name}
+      </Text>
+      
+      {/* Info Jumlah Kontribusi */}
+      <Text type="secondary" style={{ fontSize: 12 }}>
+        {g.contributions.length} items
+      </Text>
+      
+      {/* Status Tag */}
+      <Tag 
+        color={g.status === 'success' ? 'green' : g.status === 'failed' ? 'red' : 'orange'}
+        style={{ marginTop: 4 }}
+      >
+        {g.status}
+      </Tag>
+
+      {/* Modal untuk Detail Group */}
+      <Modal
         title={
           <div style={{ display: 'flex', alignItems: 'center' }}>
-            <Checkbox
-              checked={selectedGroups.includes(g.group_id)}
-              onChange={() => toggleSelectGroup(g.group_id)}
-              style={{ marginRight: 8 }}
-            />
             {isEditing ? (
               <div style={{ display: 'flex', gap: 8, flex: 1 }}>
                 <Input
@@ -273,105 +370,161 @@ const GroupItem = React.memo(({
             ) : (
               <div 
                 style={{ flex: 1, cursor: 'pointer', padding: '4px 8px' }}
-                onClick={() => startEditing(g.group_id, g.name)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startEditing(g.group_id, g.name);
+                }}
               >
                 <Text ellipsis={{ tooltip: g.name }}>{g.name}</Text>
               </div>
             )}
           </div>
         }
-        className={styles.groupCard}
-        onDrop={e => {
-          e.preventDefault();
-          handleDrop(e, g.group_id);
-          // Remove drag-over indicator
-          e.currentTarget.closest('[data-group-id]')?.removeAttribute('data-drag-over');
+        open={isModalVisible}
+        onCancel={e => {
+          e.stopPropagation();  // cegah click menyentuh parent
+          closeModalDetail();
         }}
-        onDragOver={e => {
-          e.preventDefault();
-          // Add visual indicator
-          e.currentTarget.closest('[data-group-id]')?.setAttribute('data-drag-over', 'true');
-        }}
-        onDragLeave={e => {
-          // Remove indicator
-          e.currentTarget.closest('[data-group-id]')?.removeAttribute('data-drag-over');
-        }}
-        extra={
-          <Button 
-            type="link" 
-            danger 
-            icon={<DeleteOutlined />}
-            onClick={() => handleDeleteGroup(g.group_id, g.name)}
-          />
-        }
+        footer={null}
+        width={800}
       >
-        <div style={{ maxHeight: 150, overflowY: 'auto', padding: 8 }}>
-          {g.contributions.length > 0 ? (
-            <>
-              {g.contributions.slice(0, 2).map(item => (
-                <div 
-                  key={`item-${item.contribution_id}-${g.group_id}`}
-                  style={{
-                    marginBottom: 8,
-                    padding: 8,
-                    border: '1px solid #f0f0f0',
-                    borderRadius: 4,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}
-                >
-                  <div>
-                    <Text strong ellipsis={{ tooltip: item.contribution_name }}>
-                      {item.contribution_name}
-                    </Text>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                      <Tag color="purple">Contribution ID: {item.contribution_id}</Tag>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ maxHeight: 300, overflowY: 'auto', padding: 8 }}>
+            {g.contributions.length > 0 ? (
+              <>
+                {g.contributions.map(item => (
+                  <div 
+                    key={`item-${item.contribution_id}-${g.group_id}`}
+                    style={{
+                      marginBottom: 8,
+                      padding: 8,
+                      border: '1px solid #f0f0f0',
+                      borderRadius: 4,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <div>
+                      <Text strong ellipsis={{ tooltip: getContributionName(item.contribution_id) }}>
+                        {getContributionName(item.contribution_id)}
+                      </Text>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                        <Tag color="purple">ID: {item.contribution_id}</Tag>
+                      </div>
                     </div>
+                    <Button 
+                      type="link" 
+                      danger 
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleRemoveContribution(g.group_id, item.contribution_id)}
+                    />
                   </div>
-                  <Button 
-                    type="link" 
-                    danger 
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleRemoveContribution(g.group_id, item.contribution_id)}
-                  />
-                </div>
-              ))}
-              {g.contributions.length > 2 && (
-                <Button 
-                  type="link" 
-                  onClick={() => setViewingGroup({
-                    groupId: g.group_id,
-                    groupName: g.name,
-                    contributions: g.contributions
-                  })}
-                  style={{ padding: 0 }}
-                >
-                  View All {g.contributions.length} contributions
-                </Button>
-              )}
-            </>
-          ) : (
-            <Text type="secondary">Drag contributions here</Text>
-          )}
+                ))}
+              </>
+            ) : (
+              <Text type="secondary">Drag contributions here</Text>
+            )}
+          </div>
+          
+          <Divider dashed style={{ margin: '12px 0' }} />
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text type="secondary">{g.contributions.length} contributions</Text>
+            <Tag color={g.status === 'success' ? 'green' : g.status === 'failed' ? 'red' : 'orange'}>
+              Status: {g.status}
+            </Tag>
+          </div>
+          
+          <Tooltip
+            placement="topLeft"
+            overlayStyle={{ maxWidth: 450 }}
+            overlayInnerStyle={{
+              padding: 12,
+              backgroundColor: '#ffffff',
+              border: '1px solid #d9d9d9',
+              borderRadius: 8,
+              fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace',
+              fontSize: 12,
+              lineHeight: 1.4,
+              color: '#772d2f',
+            }}
+            title={
+              g.model
+                ? (
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#772d2f' }}>
+                    {typeof g.model === 'object'
+                      ? JSON.stringify(g.model, null, 2)
+                      : g.model}
+                  </pre>
+                )
+                : '—'
+            }
+          >
+            <div
+              style={{
+                marginTop: 8,
+                background: '#f0f0f0',
+                padding: 8,
+                borderRadius: 4,
+                cursor: g.model ? 'pointer' : 'default',
+                opacity: g.model ? 1 : 0.6,
+              }}
+            >
+              <Text type="secondary" style={{ display: 'block' }}>
+                Model:
+              </Text>
+              <Text ellipsis style={{ fontSize: 12 }}>
+                {g.model
+                  ? (typeof g.model === 'object'
+                      ? `Object (${Object.keys(g.model).length} keys)`
+                      : g.model)
+                  : '-'}
+              </Text>
+            </div>
+          </Tooltip>
         </div>
         
-        <Divider dashed style={{ margin: '12px 0' }} />
-        
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Text type="secondary">{g.contributions.length} contributions</Text>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 16 }}>
+          
+          
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button 
+              type="primary"
+              icon={<CloudUploadOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                closeModalDetail();
+                onUploadModel(g.group_id);
+              }}
+              disabled={reconstructionStatus !== 'ready'}
+            >
+              Upload Model
+            </Button>
+            <Button 
+              danger 
+              icon={<DeleteOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                closeModalDetail();
+                handleDeleteGroup(g.group_id, g.name);
+              }}
+            >
+              Delete Group
+            </Button>
+          </div>
         </div>
-      </Card>
+      </Modal>
     </div>
   );
 });
 
 const GroupManagement: React.FC<GroupManagementProps> = ({ 
   reconstructionId, 
-  filterDate, // Terima prop
+  filterDate,
   onBack, 
-  onGoToConfiguration 
-
+  onGoToConfiguration,
+  reconstructionStatus 
 }) => {
   const recon = useReconstructionStore(state =>
     state.reconstructions.find(r => r.reconstruction_id === reconstructionId)
@@ -379,28 +532,26 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
 
   const apiRecons = import.meta.env.VITE_API_RECONSTRUCTION_URL;
   
-  // Gunakan referensi untuk fungsi store
   const storeRef = useRef(useReconstructionStore.getState());
   useEffect(() => {
-    useReconstructionStore.subscribe(state => storeRef.current = state);
+    const unsubscribe = useReconstructionStore.subscribe(state => storeRef.current = state);
+    return () => unsubscribe();
   }, []);
 
-  // Gunakan filterDate dalam query
   useEffect(() => {
     const fetchData = async () => {
       if (!reconstructionId || !filterDate) return;
       
       try {
-        const dateParam = filterDate.format('YYYYMMDD');
-        const response = await fetch(
-          `${apiRecons}/reconstructions/${reconstructionId}?date=${dateParam}`
-        );
+        const dateParam = filterDate.format('YYYYMM');
+        const response = await fetch(`${apiRecons}/${reconstructionId}?month=${dateParam}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch reconstruction data');
+        }
         const data = await response.json();
-        
-        // Update store dengan data baru
         useReconstructionStore.getState().updateReconstructionData(data);
       } catch (error) {
-        console.error('Failed to fetch reconstruction data:', error);
+        message.error('Error loading reconstruction: ' + (error as Error).message);
       }
     };
 
@@ -414,39 +565,29 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   const [mergedGroupName, setMergedGroupName] = useState('');
   const [loading, setLoading] = useState(false);
   const [isDraggingOverGroups, setIsDraggingOverGroups] = useState(false);
-  
-  // State untuk edit mode
   const [editingGroup, setEditingGroup] = useState<{id: string; name: string} | null>(null);
   const [tempGroupName, setTempGroupName] = useState('');
-
-  // Pisahkan filter untuk contributions dan groups
   const [contribFilters, setContribFilters] = useState<FilterState>({
     category: [],
     privacy: [],
     search: '',
     temple: [],
   });
-  
-  const [groupFilters, setGroupFilters] = useState({
-    search: ''
-  });
-
+  const [groupFilters, setGroupFilters] = useState({ search: '' });
   const [bulkMoveVisible, setBulkMoveVisible] = useState(false);
   const [targetGroup, setTargetGroup] = useState<string | null>(null);
   const [viewingGroup, setViewingGroup] = useState<ViewingGroup | null>(null);
   const [viewingContribution, setViewingContribution] = useState<Contribution | null>(null);
-
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<{ groupId: string; groupName: string } | null>(null);
+  const [initializationFlags] = useState({ default: false, area: false });
   
-  // State untuk menandai inisialisasi
-  const [initializationFlags, setInitializationFlags] = useState({
-    default: false,
-    area: false
-  });
+  // State untuk upload model
+  const [uploadModalVisible, setUploadModalVisible] = useState(false);
+  const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [files, setFiles] = useState<FileUploadState>({});
 
-  // Fungsi untuk menangani drop di area groups
-  
   const handleDropOnGroupsArea = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDraggingOverGroups(false);
@@ -457,16 +598,11 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
       const data = JSON.parse(e.dataTransfer.getData('application/json')) as DragItem;
       
       if (data.type === 'contribution') {
-        // Check if dropped on existing group card
         const targetElement = e.target as HTMLElement;
         const groupCard = targetElement.closest('[data-group-id]');
         
-        if (groupCard) {
-          // Handled by GroupItem's onDrop - do nothing
-          return;
-        }
-        
-        // Create new group only if not dropped on existing group
+        if (groupCard) return;
+
         const items = recon.contributions.filter(c =>
           (data.ids as number[]).includes(c.contribution_id)
         );
@@ -476,33 +612,30 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
         const newGroupName = `Group ${recon.groups.length + 1}`;
         const newGroupId = `group-${Date.now()}`;
         
-        storeRef.current.addGroupWithContributions(
-          reconstructionId,
-          newGroupId,
-          newGroupName,
-          items
-        );
-        
-        message.success(`Created new group "${newGroupName}" with ${items.length} contributions`);
+        try {
+          storeRef.current.addGroupWithContributions(
+            reconstructionId,
+            newGroupId,
+            newGroupName,
+            items
+          );
+          message.success(`Created new group "${newGroupName}" with ${items.length} contributions`);
+        } catch (error) {
+          message.error('Failed to create group: ' + (error as Error).message);
+        }
       }
     } catch (err) {
       console.error('Failed to parse drag data:', err);
     }
   }, [recon, reconstructionId]);
 
-  // Reset inisialisasi saat reconstruction berubah
   useEffect(() => {
-    setInitializationFlags({
-      default: false,
-      area: false
-    });
     setSelectedGroups([]);
-    setContribFilters({ category: [], privacy: [], search: '',temple:[] });
+    setContribFilters({ category: [], privacy: [], search: '', temple: [] });
     setGroupFilters({ search: '' });
     setEditingGroup(null);
   }, [reconstructionId]);
 
-  // Filtered contributions
   const filteredContributions = useMemo(() => {
     if (!recon) return [];
     
@@ -529,35 +662,20 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
       
       return true;
     });
-  }, [
-    recon?.contributions, 
-    contribFilters.category, 
-    contribFilters.privacy, 
-    contribFilters.search,
-    contribFilters.temple,
-  ]);
+  }, [recon, contribFilters]);
 
-  // Filtered groups
   const filteredGroups = useMemo(() => {
     if (!recon) return [];
-    
-    return recon.groups.filter(g => {
-      if (groupFilters.search && 
-          !g.name.toLowerCase().includes(groupFilters.search.toLowerCase())) {
-        return false;
-      }
-      
-      return true;
-    });
+    return recon.groups.filter(g => 
+      groupFilters.search ? g.name.toLowerCase().includes(groupFilters.search.toLowerCase()) : true
+    );
   }, [recon, groupFilters]);
 
-  // Available categories
   const categories = useMemo(() => {
     if (!recon) return [];
     return Array.from(new Set(recon.contributions.map(c => c.category).filter(Boolean))) as string[];
   }, [recon]);
 
-  // Available privacy settings
   const privacySettings = useMemo(() => {
     if (!recon) return [];
     return Array.from(new Set(recon.contributions.map(c => c.privacy_setting)));
@@ -565,23 +683,22 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
 
   const handleCreateGroup = useCallback(() => {
     if (!newGroupName.trim()) return;
-    storeRef.current.addGroup(reconstructionId, newGroupName.trim());
-    setNewGroupName('');
-    message.success(`Group "${newGroupName.trim()}" created`);
+    try {
+      storeRef.current.addGroup(reconstructionId, newGroupName.trim());
+      setNewGroupName('');
+      message.success(`Group "${newGroupName.trim()}" created`);
+    } catch (error) {
+      message.error('Failed to create group: ' + (error as Error).message);
+    }
   }, [newGroupName, reconstructionId]);
 
   const handleDragStart = useCallback((e: React.DragEvent, type: 'contribution' | 'group', ids: number[] | string[]) => {
     e.dataTransfer.setData('application/json', JSON.stringify({ type, ids }));
   }, []);
 
-  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
-
   const handleDrop = useCallback((e: React.DragEvent, groupId: string) => {
     e.preventDefault();
-    if (!recon) {
-      message.error('Data belum tersedia, silakan tunggu sebentar.');
-      return;
-    }
+    if (!recon) return;
 
     try {
       const data = JSON.parse(e.dataTransfer.getData('application/json')) as DragItem;
@@ -591,28 +708,24 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
         );
         if (!items.length) return;
 
-        storeRef.current.addContributionsToGroup(reconstructionId, groupId, items);
-        message.success(`${items.length} kontribusi dipindahkan ke grup.`);
+        try {
+          storeRef.current.addContributionsToGroup(reconstructionId, groupId, items);
+          message.success(`${items.length} contributions moved to group`);
+        } catch (error) {
+          message.error('Failed to move contributions: ' + (error as Error).message);
+        }
       }
     } catch (err) {
-      console.error('Gagal parsing data drag:', err);
+      console.error('Failed to parse drag data:', err);
     }
   }, [recon, reconstructionId]);
 
   const toggleSelectContrib = useCallback((id: number) => {
-    setSelectedContribs(prev =>
-      prev.includes(id) 
-        ? prev.filter(x => x !== id) 
-        : [...prev, id]
-    );
+    setSelectedContribs(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }, []);
   
   const toggleSelectGroup = useCallback((groupId: string) => {
-    setSelectedGroups(prev =>
-      prev.includes(groupId) 
-        ? prev.filter(id => id !== groupId) 
-        : [...prev, groupId]
-    );
+    setSelectedGroups(prev => prev.includes(groupId) ? prev.filter(id => id !== groupId) : [...prev, groupId]);
   }, []);
 
   const selectAllContribs = useCallback(() => {
@@ -641,11 +754,9 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
       .map(id => recon?.groups.find(g => g.group_id === id)?.name || '')
       .filter(name => name);
     
-    if (selectedGroupNames.length > 0) {
-      setMergedGroupName(`Merged: ${selectedGroupNames.join(' + ')}`);
-    } else {
-      setMergedGroupName('Merged Group');
-    }
+    setMergedGroupName(selectedGroupNames.length > 0 
+      ? `Merged: ${selectedGroupNames.join(' + ')}` 
+      : 'Merged Group');
     
     setMergeModalVisible(true);
   }, [selectedGroups, recon]);
@@ -654,12 +765,15 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
     if (!recon || selectedGroups.length < 2) return;
     
     const newGroupName = mergedGroupName.trim() || 'Merged Group';
-    storeRef.current.mergeGroups(reconstructionId, selectedGroups, newGroupName);
-    
-    message.success(`Merged ${selectedGroups.length} groups into "${newGroupName}"`);
-    setSelectedGroups([]);
-    setMergeModalVisible(false);
-    setMergedGroupName('');
+    try {
+      storeRef.current.mergeGroups(reconstructionId, selectedGroups, newGroupName);
+      message.success(`Merged ${selectedGroups.length} groups into "${newGroupName}"`);
+      setSelectedGroups([]);
+      setMergeModalVisible(false);
+      setMergedGroupName('');
+    } catch (error) {
+      message.error('Failed to merge groups: ' + (error as Error).message);
+    }
   }, [recon, selectedGroups, mergedGroupName, reconstructionId]);
 
   const moveSelectedContribs = useCallback(() => {
@@ -669,14 +783,17 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
     }
     
     const items = recon?.contributions.filter(c => 
-      selectedContribs.includes(c.contribution_id)
-    ) || [];
+      selectedContribs.includes(c.contribution_id)) || [];
     
     if (items.length) {
-      storeRef.current.addContributionsToGroup(reconstructionId, targetGroup, items);
-      message.success(`${items.length} contributions moved to group`);
-      setSelectedContribs([]);
-      setBulkMoveVisible(false);
+      try {
+        storeRef.current.addContributionsToGroup(reconstructionId, targetGroup, items);
+        message.success(`${items.length} contributions moved to group`);
+        setSelectedContribs([]);
+        setBulkMoveVisible(false);
+      } catch (error) {
+        message.error('Failed to move contributions: ' + (error as Error).message);
+      }
     }
   }, [targetGroup, selectedContribs, recon, reconstructionId]);
 
@@ -688,8 +805,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
       content: `Are you sure you want to remove ${selectedContribs.length} contributions from their groups?`,
       onOk: () => {
         const contribs = recon?.contributions.filter(c => 
-          selectedContribs.includes(c.contribution_id)
-        ) || [];
+          selectedContribs.includes(c.contribution_id)) || [];
         
         recon?.groups.forEach(group => {
           const itemsInGroup = group.contributions.filter(c =>
@@ -697,15 +813,19 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
           );
 
           if (itemsInGroup.length > 0) {
-            storeRef.current.removeContributionsFromGroup(
-              reconstructionId, 
-              group.group_id, 
-              itemsInGroup
-            );
+            try {
+              storeRef.current.removeContributionsFromGroup(
+                reconstructionId, 
+                group.group_id, 
+                itemsInGroup
+              );
+              message.success(`${itemsInGroup.length} contributions removed from groups`);
+            } catch (error) {
+              message.error(`Failed to remove contributions from group ${group.name}: ` + (error as Error).message);
+            }
           }
         });
 
-        message.success(`${contribs.length} contributions removed from groups`);
         setSelectedContribs([]);
       }
     });
@@ -717,11 +837,15 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   }, []);
 
   const confirmDeleteGroup = useCallback(() => {
-    if (groupToDelete) {
+    if (!groupToDelete) return;
+    
+    try {
       storeRef.current.removeGroup(reconstructionId, groupToDelete.groupId);
       message.success(`Group "${groupToDelete.groupName}" deleted`);
       setDeleteModalVisible(false);
       setGroupToDelete(null);
+    } catch (error) {
+      message.error('Failed to delete group: ' + (error as Error).message);
     }
   }, [groupToDelete, reconstructionId]);
 
@@ -734,21 +858,24 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
     const contribution = group.contributions.find(c => c.contribution_id === contributionId);
     if (!contribution) return;
 
-    storeRef.current.removeContributionsFromGroup(
-      reconstructionId, 
-      groupId, 
-      [contribution]
-    );
-    
-    message.success('Contribution removed from group');
-    
-    if (viewingGroup && viewingGroup.groupId === groupId) {
-      setViewingGroup(prev => ({
-        ...prev!,
-        contributions: prev!.contributions.filter(c => 
-          c.contribution_id !== contributionId
-        )
-      }));
+    try {
+      storeRef.current.removeContributionsFromGroup(
+        reconstructionId, 
+        groupId, 
+        [contribution]
+      );
+      message.success('Contribution removed from group');
+      
+      if (viewingGroup && viewingGroup.groupId === groupId) {
+        setViewingGroup(prev => ({
+          ...prev!,
+          contributions: prev!.contributions.filter(c => 
+            c.contribution_id !== contributionId
+          )
+        }));
+      }
+    } catch (error) {
+      message.error('Failed to remove contribution: ' + (error as Error).message);
     }
   }, [recon, reconstructionId, viewingGroup]);
 
@@ -758,86 +885,111 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   }, []);
 
   const saveEditing = useCallback(() => {
-    if (editingGroup && tempGroupName.trim()) {
+    if (!editingGroup || !tempGroupName.trim()) return;
+    
+    try {
       storeRef.current.updateGroupName(reconstructionId, editingGroup.id, tempGroupName.trim());
       setEditingGroup(null);
       message.success(`Group renamed to "${tempGroupName.trim()}"`);
+    } catch (error) {
+      message.error('Failed to rename group: ' + (error as Error).message);
     }
   }, [editingGroup, tempGroupName, reconstructionId]);
 
-  // Fungsi untuk inisialisasi grup 1:1
   const initializeOneToOne = useCallback(() => {
     if (!recon) return;
     
     setLoading(true);
     
     setTimeout(() => {
-      const { removeGroup, addGroupWithContributions } = storeRef.current;
-      
-      // Hapus grup default yang sudah ada
-      recon.groups
-        .filter(g => g.name.startsWith('Group '))
-        .forEach(g => removeGroup(reconstructionId, g.group_id));
+      try {
+        const { removeGroup, addGroupWithContributions } = storeRef.current;
+        
+        recon.groups
+          .filter(g => g.name.startsWith('Group '))
+          .forEach(g => {
+            try {
+              removeGroup(reconstructionId, g.group_id);
+            } catch (error) {
+              console.error('Failed to remove group:', error);
+            }
+          });
 
-      // Buat grup baru untuk setiap kontribusi
-      recon.contributions.forEach((contrib, index) => {
-        const groupName = `Group ${index + 1}`;
-        const groupId = `group-${reconstructionId}-${contrib.contribution_id}`;
-        addGroupWithContributions(
-          reconstructionId,
-          groupId,
-          groupName,
-          [contrib]
-        );
-      });
+        recon.contributions.forEach((contrib) => {
+          const groupName = `Group ${contrib.contribution_id}`;
+          const groupId = `group-${reconstructionId}-${contrib.contribution_id}`;
+          try {
+            addGroupWithContributions(
+              reconstructionId,
+              groupId,
+              groupName,
+              [contrib]
+            );
+          } catch (error) {
+            console.error('Failed to add group:', error);
+          }
+        });
 
-      message.success('Groups initialized 1:1 successfully');
-      setLoading(false);
+        message.success('Groups initialized 1:1 successfully');
+      } catch (error) {
+        message.error('Initialization failed: ' + (error as Error).message);
+      } finally {
+        setLoading(false);
+      }
     }, 500);
   }, [recon, reconstructionId]);
 
-  // Fungsi untuk inisialisasi grup by area
   const initializeByArea = useCallback(() => {
     if (!recon) return;
     
     setLoading(true);
     
     setTimeout(() => {
-      const { removeGroup, addGroupWithContributions } = storeRef.current;
-      
-      // Hapus grup area yang sudah ada
-      const areaGroups = recon.groups.filter(g => g.name.startsWith('Area:'));
-      areaGroups.forEach(group => {
-        removeGroup(reconstructionId, group.group_id);
-      });
+      try {
+        const { removeGroup, addGroupWithContributions } = storeRef.current;
+        
+        const areaGroups = recon.groups.filter(g => g.name.startsWith('Area:'));
+        areaGroups.forEach(group => {
+          try {
+            removeGroup(reconstructionId, group.group_id);
+          } catch (error) {
+            console.error('Failed to remove area group:', error);
+          }
+        });
 
-      // Dapatkan area unik
-      const uniqueAreas = Array.from(
-        new Set(
-          recon.contributions
-            .map(c => c.category)
-            .filter((area): area is string => !!area)
-        )
-      );
-      
-      // Buat grup untuk setiap area
-      uniqueAreas.forEach(area => {
-        const groupName = `Area: ${area}`;
-        const groupId = `area-group-${reconstructionId}-${area}`;
-        const areaContributions = recon.contributions.filter(
-          c => c.category === area
+        const uniqueAreas = Array.from(
+          new Set(
+            recon.contributions
+              .map(c => c.category)
+              .filter((area): area is string => !!area)
+          )
         );
         
-        addGroupWithContributions(
-          reconstructionId, 
-          groupId, 
-          groupName, 
-          areaContributions
-        );
-      });
-      
-      message.success('Groups initialized by area successfully');
-      setLoading(false);
+        uniqueAreas.forEach(area => {
+          const groupName = `Area: ${area}`;
+          const groupId = `area-group-${reconstructionId}-${area}`;
+          const areaContributions = recon.contributions.filter(
+            c => c.category === area
+          );
+          
+          try {
+            addGroupWithContributions(
+              reconstructionId, 
+              groupId, 
+              groupName, 
+              areaContributions
+            );
+          } catch (error) {
+            console.error('Failed to add area group:', error);
+          }
+        });
+        
+        message.success('Groups initialized by area successfully');
+      } catch (error) {
+        message.error('Area initialization failed: ' + (error as Error).message);
+      } finally {
+        setLoading(false);
+      }
     }, 500);
   }, [recon, reconstructionId]);
 
@@ -850,13 +1002,11 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
       ));
     }, [recon]);
 
-  // Fungsi untuk menampilkan video dalam modal
   const renderMediaContent = (contribution: Contribution) => {
     if (!contribution.share_link) {
       return <Text type="secondary">No media available</Text>;
     }
     
-    // Deteksi jika link adalah video
     const videoExtensions = ['.mp4', '.mov', '.avi', '.webm'];
     const isVideo = videoExtensions.some(ext => 
       contribution.share_link.toLowerCase().endsWith(ext)
@@ -874,21 +1024,19 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
       );
     }
     
-    // Deteksi jika link adalah YouTube
     if (contribution.share_link) {
       return (
-            <iframe
-              width="100%"
-              height="315"
-              src={`${contribution.share_link}`}
-              frameBorder="0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              style={{ borderRadius: '8px' }}
-            ></iframe>
-          );
+        <iframe
+          width="100%"
+          height="315"
+          src={`${contribution.share_link}`}
+          frameBorder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+          style={{ borderRadius: '8px' }}
+        ></iframe>
+      );
     }
-    
 
     return (
       <Button 
@@ -900,6 +1048,67 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
         View Content
       </Button>
     );
+  };
+
+  // File upload handlers
+  const handleOpenUploadModal = (groupId: string) => {
+    setCurrentGroupId(groupId);
+    setUploadModalVisible(true);
+  };
+
+  const [modelId, setModelId] = useState<string>('');
+  const uploadGroupModel = useReconstructionStore(state => state.uploadGroupModel);
+
+  const beforeUpload = (file: RcFile, field: keyof FileUploadState) => {
+    return false; // prevent auto upload
+  };
+
+  // karena uploadGroupModel sekarang sudah menjaga status tetap 'ready'
+  const handleUploadFiles = async () => {
+    if (!modelId.trim()) {
+      message.error('Please enter a Model ID');
+      return;
+    }
+    setUploading(true);
+    try {
+      const dateParam = filterDate?.format('YYYYMM');
+      if (!recon || !currentGroupId || !dateParam) {
+        throw new Error('Missing required data');
+      }
+
+      const success = await uploadGroupModel(
+        recon.reconstruction_id,
+        currentGroupId,
+        modelId.trim(),
+        files,
+        dateParam
+      );
+
+      if (success) {
+        message.success('Upload successful!');
+        setUploadModalVisible(false);
+        setModelId('');
+        setFiles({});
+
+        setTimeout(() => {
+          setUploadModalVisible(false);
+          setModelId('');
+          setFiles({});
+        }, 300);
+      } else {
+        throw new Error('Upload failed');
+      }
+    } catch (err: any) {
+      console.error(err);
+      message.error('Upload failed: ' + err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const uploadProps: UploadProps = {
+    beforeUpload: () => false,
+    showUploadList: true,
   };
 
   if (!recon) {
@@ -919,7 +1128,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
             type="primary" 
             onClick={onGoToConfiguration} 
             disabled={!recon.groups.length}
-            style={{ backgroundColor: "#772d2f",marginBottom:'15px' }}
+            style={{ backgroundColor: "#772d2f", marginBottom: '15px' }}
           >
             Next: Configuration
           </Button>
@@ -947,22 +1156,22 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
         </Button>
       </Card>
 
-      <Row gutter={24} style={{ height: 'calc(110vh - 250px)', marginTop: 32, marginBottom: 30 }}>
+      <Row gutter={24} style={{ height: 'calc(110vh - 100px)', marginTop: 32, marginBottom: 30,overflow:'auto' }}>
         <Col span={14}>
           <div style={{ display: 'flex', gap: 8 }}>
-              <Search
-                  placeholder="Search contributions..."
-                  allowClear
-                  enterButton={<SearchOutlined />}
-                  size="middle"
-                  style={{ width: 270, marginRight: 8, marginBottom: 12 }}
-                  value={contribFilters.search}
-                  onChange={e => setContribFilters(prev => ({ 
-                    ...prev, 
-                    search: e.target.value 
-                  }))}
-                />
-                <Popover
+            <Search
+              placeholder="Search contributions..."
+              allowClear
+              enterButton={<SearchOutlined />}
+              size="middle"
+              style={{ width: 270, marginRight: 8, marginBottom: 12 }}
+              value={contribFilters.search}
+              onChange={e => setContribFilters(prev => ({ 
+                ...prev, 
+                search: e.target.value 
+              }))}
+            />
+            <Popover
               placement="bottomRight"
               title="Filter Contributions"
               content={
@@ -1005,7 +1214,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
                   <Button 
                     type="primary" 
                     block 
-                    onClick={() => setContribFilters({ category: [], privacy: [], search: '',temple:[]})}
+                    onClick={() => setContribFilters({ category: [], privacy: [], search: '', temple: [] })}
                   >
                     Clear Filters
                   </Button>
@@ -1014,7 +1223,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
               trigger="click"
             >
               <Button icon={<FilterOutlined />}>Filters</Button>
-                </Popover>
+            </Popover>
           </div>
             
           <Card 
@@ -1022,7 +1231,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>Contributions ({filteredContributions.length})</span>
                 <div>
-                  
                   <Checkbox
                     indeterminate={selectedContribs.length > 0 && selectedContribs.length < filteredContributions.length}
                     checked={selectedContribs.length > 0 && selectedContribs.length === filteredContributions.length}
@@ -1057,7 +1265,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
             className={styles.card}
             style={{ height: '100%' }}
             bodyStyle={{ padding: 0, height: 'calc(100% - 60px)', overflow: 'hidden' }}
-            
           >
             {filteredContributions.length === 0 ? (
               <Empty 
@@ -1091,8 +1298,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
                 )}
               </AutoSizer>
             )}
-
-            
           </Card>
         </Col>
 
@@ -1155,7 +1360,7 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
             }
             className={styles.card}
             style={{ height: '100%' }}
-            bodyStyle={{ padding: 0, height: 'calc(100% - 60px)', overflow: 'hidden' }}
+            bodyStyle={{ padding:0, height: 'calc(100% - 60px)', overflow: 'auto' }}
             onDrop={handleDropOnGroupsArea}
             onDragOver={(e) => {
               e.preventDefault();
@@ -1170,134 +1375,303 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
                 style={{ padding: 40 }}
               />
             ) : (
-              <AutoSizer>
-                {({ height, width }) => (
-                  <List
-                    height={height}
-                    itemCount={filteredGroups.length}
-                    itemSize={GROUP_ITEM_HEIGHT}
-                    width={width}
-                    itemKey={index => filteredGroups[index]?.group_id || index}
+               <div 
+                style={{ 
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                      gap: '16px',
+                      padding: '16px'
+                    }}
+                 
                   >
-                    {({ index, style }) => (
+                    {filteredGroups.map((g) => (
                       <GroupItem
-                        g={filteredGroups[index]}
-                        selectedGroups={selectedGroups}
-                        toggleSelectGroup={toggleSelectGroup}
-                        editingGroup={editingGroup}
-                        tempGroupName={tempGroupName}
-                        setTempGroupName={setTempGroupName}
-                        saveEditing={saveEditing}
-                        startEditing={startEditing}
-                        handleDeleteGroup={handleDeleteGroup}
-                        handleRemoveContribution={handleRemoveContribution}
-                        setViewingGroup={setViewingGroup}
-                        reconstructionId={reconstructionId}
-                        handleDrop={handleDrop}
-                        style={style}
-                      />
-                    )}
-                  </List>
-                )}
-              </AutoSizer>
+                          key={g.group_id}
+                          g={g}
+                          selectedGroups={selectedGroups}
+                          toggleSelectGroup={toggleSelectGroup}
+                          editingGroup={editingGroup}
+                          tempGroupName={tempGroupName}
+                          setTempGroupName={setTempGroupName}
+                          saveEditing={saveEditing}
+                          startEditing={startEditing}
+                          handleDeleteGroup={handleDeleteGroup}
+                          handleRemoveContribution={handleRemoveContribution}
+                          setViewingGroup={setViewingGroup}
+                          reconstructionId={reconstructionId}
+                          handleDrop={handleDrop}
+                          onUploadModel={handleOpenUploadModal}
+                          reconstructionStatus={reconstructionStatus}
+                          recon={recon}
+                          style={{
+                            height: '150px',
+                            borderRadius: '12px',
+                            boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+                            padding: '16px',
+                            backgroundColor: '#fff',
+                            transition: 'all 0.3s',
+                            cursor: 'pointer',
+                            overflow: 'hidden',
+                          
+                          }}
+                        />
+                            
+                            // '&:hover': {
+                            //   boxShadow: '0 6px 12px rgba(0, 0, 0, 0.15)',
+                            // },
+                    ))}
+                </div>
             )}
-             {/* Overlay saat drag sedang terjadi */}
-            
           </Card>
         </Col>
       </Row>
 
-      
-      {/* Delete Group Modal */}
+      {/* Modal untuk upload model files */}
       <Modal
-        title="Delete Group"
-        open={deleteModalVisible}
-        onOk={confirmDeleteGroup}
-        onCancel={() => {
-          setDeleteModalVisible(false);
-          setGroupToDelete(null);
-        }}
-        okText="Delete"
-        cancelText="Cancel"
-        okButtonProps={{ danger: true }}
-      >
-        <Text>Are you sure you want to delete "</Text>
-        <Text strong>{groupToDelete?.groupName || ''}</Text>
-        <Text>"?</Text>
-      </Modal>
-
-      {/* Merge Groups Modal */}
-      <Modal
-        title="Merge Groups"
-        open={mergeModalVisible}
-        onOk={confirmMergeGroups}
-        onCancel={() => setMergeModalVisible(false)}
-        okText="Merge"
-        cancelText="Cancel"
-        width={600}
-      >
-        <div style={{ marginBottom: 16 }}>
-          <Text strong>Selected Groups:</Text>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, maxHeight: 200, overflowY: 'auto' }}>
-            {selectedGroups.map(groupId => {
-              const group = recon?.groups.find(g => g.group_id === groupId);
-              return group ? (
-                <Tag key={groupId} color="blue" style={{ marginBottom: 4 }}>
-                  {group.name} ({group.contributions.length} items)
-                </Tag>
-              ) : null;
-            })}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <UploadOutlined style={{ fontSize: 20, color: '#772d2f', flexShrink: 0 }} />
+            <Text style={{ fontSize: 'clamp(16px, 2vw, 18px)', fontWeight: 600, color: '#772d2f' }}>
+              Upload Model Files for Group
+            </Text>
           </div>
-        </div>
-        
-        <div style={{ marginBottom: 8 }}>
-          <Text strong>New Group Name:</Text>
+        }
+        open={uploadModalVisible}
+        onCancel={() => setUploadModalVisible(false)}
+        onOk={handleUploadFiles}
+        confirmLoading={uploading}
+        width="50vw"
+      
+        okText="Upload"
+        cancelText="Cancel"
+        style={{ borderRadius: 12 }}
+        bodyStyle={{
+          padding: 'clamp(16px, 3vw, 32px)',
+          background: 'linear-gradient(135deg, #fffafa, #f2e8e9)',
+          borderRadius: 12,
+        }}
+      >
+        {/* Model ID Input */}
+        <div style={{ marginBottom: 24 }}>
+          <Text strong style={{ display: 'block', marginBottom: 8, color: '#772d2f' }}>
+            Model ID
+          </Text>
           <Input
-            value={mergedGroupName}
-            onChange={e => setMergedGroupName(e.target.value)}
-            placeholder="Enter new group name"
-            style={{ marginTop: 8 }}
+            placeholder="Masukkan Model ID"
+            value={modelId}
+            onChange={e => setModelId(e.target.value)}
+            style={{ borderColor: '#772d2f', borderRadius: 8 }}
           />
         </div>
-      </Modal>
-      
-      {/* Bulk Move Modal */}
-      <Modal
-        title="Move Selected Contributions"
-        open={bulkMoveVisible}
-        onOk={moveSelectedContribs}
-        onCancel={() => setBulkMoveVisible(false)}
-        okText="Move"
-        cancelText="Cancel"
-        okButtonProps={{ disabled: !targetGroup }}
-      >
-        <div style={{ marginBottom: 16 }}>
-          <Text>
-            You are about to move <Text strong>{selectedContribs.length}</Text> contributions
-          </Text>
+
+        {/* Responsive file upload grid */}
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
+          gap: 24,
+          alignItems: 'stretch'
+        }}>
+          {/* Model Files */}
+          <div style={{
+            gridColumn: '1 / -1',
+            backgroundColor: '#f9e8e9',
+            padding: 16,
+            borderRadius: 8,
+            boxShadow: '0 2px 6px rgba(119, 45, 47, 0.15)',
+          }}>
+            <Text strong style={{ display: 'block', marginBottom: 8, color: '#772d2f' }}>
+              Model Files (multiple)
+            </Text>
+            <Upload
+              {...uploadProps}
+              multiple
+              fileList={files.model_files}
+              onChange={({ fileList }) =>
+                setFiles(prev => ({ ...prev, model_files: fileList }))
+              }
+              beforeUpload={file => beforeUpload(file, 'model_files')}
+              itemRender={(originNode, file) => (
+                <div style={{
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {originNode}
+                </div>
+              )}
+            >
+              <Button
+                icon={<UploadOutlined />}
+                type="primary"
+                style={{ backgroundColor: '#772d2f', borderColor: '#772d2f' }}
+                block
+              >
+                Select Model Files
+              </Button>
+            </Upload>
+          </div>
+
+          {/* File upload items */}
+          {[
+            { key: 'log', title: 'Log File', color: '#a03e3f', bgColor: '#faecec' },
+            { key: 'eval', title: 'Eval File', color: '#8f3536', bgColor: '#fcebea' },
+            { key: 'nerfstudio_data', title: 'Nerfstudio Data', color: '#7d2e2f', bgColor: '#fcebea' },
+            { key: 'nerfstudio_model', title: 'Nerfstudio Model', color: '#6b292a', bgColor: '#fbeaea' }
+          ].map(item => {
+            const uploadKey = item.key as keyof FileUploadState;
+            const fileValue = files[uploadKey];
+            
+            // Untuk field non-multiple, konversi ke array jika ada nilainya
+            const fileList = fileValue ? [fileValue] : [];
+            
+            return (
+              <div
+                key={uploadKey}
+                style={{
+                  backgroundColor: item.bgColor,
+                  padding: 16,
+                  borderRadius: 8,
+                  boxShadow: '0 2px 6px rgba(119, 45, 47, 0.10)',
+                  minWidth: 0
+                }}
+              >
+                <Text strong style={{ 
+                  display: 'block', 
+                  marginBottom: 8, 
+                  color: item.color,
+                  fontSize: 'clamp(14px, 1.5vw, 16px)'
+                }}>
+                  {item.title}
+                </Text>
+                <Upload
+                  {...uploadProps}
+                  fileList={fileList as UploadFile[]}
+                  onChange={({ fileList }) => {
+                    // Untuk field non-multiple, simpan file pertama atau undefined
+                    setFiles(prev => ({ 
+                      ...prev, 
+                      [uploadKey]: fileList.length > 0 ? fileList[0] : undefined 
+                    }));
+                  }}
+                  beforeUpload={file => beforeUpload(file, uploadKey)}
+                  itemRender={(originNode, file) => (
+                    <div style={{
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {originNode}
+                    </div>
+                  )}
+                >
+                  <Button
+                    icon={<UploadOutlined />}
+                    style={{ 
+                      color: '#772d2f', 
+                      borderColor: '#dba3a5',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}
+                    block
+                  >
+                    Select {uploadKey.replace('_', ' ')}
+                  </Button>
+                </Upload>
+              </div>
+            );
+          })}
         </div>
+      </Modal>
+
+        <Modal
+          title="Delete Group"
+          open={deleteModalVisible}
+          onOk={confirmDeleteGroup}
+          onCancel={() => {
+            setDeleteModalVisible(false);
+            setGroupToDelete(null);
+          }}
+          okText="Delete"
+          cancelText="Cancel"
+          okButtonProps={{ danger: true }}
+        >
+          <Text>Are you sure you want to delete "</Text>
+          <Text strong>{groupToDelete?.groupName || ''}</Text>
+          <Text>"?</Text>
+        </Modal>
+
+        <Modal
+          title="Merge Groups"
+          open={mergeModalVisible}
+          onOk={confirmMergeGroups}
+          onCancel={() => setMergeModalVisible(false)}
+          okText="Merge"
+          cancelText="Cancel"
+          width={600}
+        >
+          <div style={{ marginBottom: 16 }}>
+            <Text strong>Selected Groups:</Text>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, maxHeight: 200, overflowY: 'auto' }}>
+              {selectedGroups.map(groupId => {
+                const group = recon?.groups.find(g => g.group_id === groupId);
+                return group ? (
+                  <Tag key={groupId} color="blue" style={{ marginBottom: 4 }}>
+                    {group.name} ({group.contributions.length} items)
+                  </Tag>
+                ) : null;
+              })}
+            </div>
+          </div>
+          
+          <div style={{ marginBottom: 8 }}>
+            <Text strong>New Group Name:</Text>
+            <Input
+              value={mergedGroupName}
+              onChange={e => setMergedGroupName(e.target.value)}
+              placeholder="Enter new group name"
+              style={{ marginTop: 8 }}
+            />
+          </div>
+        </Modal>
         
-        <div style={{ marginBottom: 16 }}>
-          <Text strong>Target Group:</Text>
-          <Select
-            style={{ width: '100%', marginTop: 8 }}
-            placeholder="Select a group"
-            value={targetGroup}
-            onChange={setTargetGroup}
-            showSearch
-            optionFilterProp="label"
-          >
-            {recon?.groups.map(g => (
-              <Option key={g.group_id} value={g.group_id} label={g.name}>
-                {g.name} ({g.contributions.length} items)
-              </Option>
-            ))}
-          </Select>
-        </div>
-      </Modal>
-      
-      {/* Group Contributions Modal */}
-      {viewingGroup && (
+        <Modal
+          title="Move Selected Contributions"
+          open={bulkMoveVisible}
+          onOk={moveSelectedContribs}
+          onCancel={() => setBulkMoveVisible(false)}
+          okText="Move"
+          cancelText="Cancel"
+          okButtonProps={{ disabled: !targetGroup }}
+        >
+          <div style={{ marginBottom: 16 }}>
+            <Text>
+              You are about to move <Text strong>{selectedContribs.length}</Text> contributions
+            </Text>
+          </div>
+          
+          <div style={{ marginBottom: 16 }}>
+            <Text strong>Target Group:</Text>
+            <Select
+              style={{ width: '100%', marginTop: 8 }}
+              placeholder="Select a group"
+              value={targetGroup}
+              onChange={setTargetGroup}
+              showSearch
+              optionFilterProp="label"
+            >
+              {recon?.groups.map(g => (
+                <Option key={g.group_id} value={g.group_id} label={g.name}>
+                  {g.name} ({g.contributions.length} items)
+                </Option>
+              ))}
+            </Select>
+          </div>
+        </Modal>
+        
+        {viewingGroup && (
           <Modal
             title={`Contributions in ${viewingGroup.groupName}`}
             open={!!viewingGroup}
@@ -1308,261 +1682,134 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
             <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
               <AntList
                 dataSource={viewingGroup.contributions}
-                renderItem={(item: Contribution) => (
-                  <Card 
-                    key={item.contribution_id} 
-                    style={{ marginBottom: 8 }}
-                    bodyStyle={{ padding: 12 }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text strong>{item.contribution_name}</Text>
-                      <Button 
-                        type="link" 
-                        danger 
-                        icon={<DeleteOutlined />}
-                        onClick={() => handleRemoveContribution(viewingGroup.groupId, item.contribution_id)}
-                      />
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                      <Tag color="purple">Contribution ID: {item.contribution_id || 'N/A'}</Tag>
-                      {/* <Tag color={item.privacy_setting === 'public' ? 'green' : 'red'}>
-                        {item.privacy_setting}
-                      </Tag> */}
-                    </div>
-                  </Card>
-                )}
+                renderItem={(item: Contribution) => {
+                  // Fungsi untuk mendapatkan nama kontribusi
+                  const getContributionName = () => {
+                    if (!recon?.contributions) return `Contribution ${item.contribution_id}`;
+                    
+                    const fullContribution = recon.contributions.find(
+                      c => c.contribution_id === item.contribution_id
+                    );
+                    
+                    return fullContribution?.contribution_name || `Contribution ${item.contribution_id}`;
+                  };
+
+                  return (
+                    <Card 
+                      key={item.contribution_id} 
+                      style={{ marginBottom: 8 }}
+                      bodyStyle={{ padding: 12 }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        {/* Gunakan fungsi getContributionName di sini */}
+                        <Text strong>{getContributionName()}</Text>
+                        <Button 
+                          type="link" 
+                          danger 
+                          icon={<DeleteOutlined />}
+                          onClick={() => handleRemoveContribution(viewingGroup.groupId, item.contribution_id)}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 0 }}>
+                        <Tag color="purple">Contribution ID: {item.contribution_id || 'N/A'}</Tag>
+                      </div>
+                    </Card>
+                  );
+                }}
               />
             </div>
           </Modal>
         )}
 
-      {/* Contribution Detail Modal */}
-      {viewingContribution && (
-      <Modal
+        {viewingContribution && (
+          <Modal
             title={`Contribution Details: ${viewingContribution.contribution_name}`}
             open={!!viewingContribution}
             onCancel={() => setViewingContribution(null)}
             footer={null}
             width={800}
-            style={{
-              borderRadius: '16px',
-              overflow: 'hidden',
-              padding: 0,
-            }}
-            bodyStyle={{
-              padding: 0,
-              background: '#ffffff',
-              color: '#333',
-            }}
+            style={{ borderRadius: '16px', overflow: 'hidden', padding: 0 }}
+            bodyStyle={{ padding: 0, background: '#ffffff', color: '#333' }}
           >
-          <div style={{
-            maxHeight: '70vh',
-            overflowY: 'auto',
-            padding: '24px',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-            background: '#ffffff',
-          }}>
-            {/* Header Section */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '24px',
-              paddingBottom: '16px',
-              borderBottom: '1px solid #e0e0e0',
-            }}>
-              <div>
-                <Text style={{ 
-                  display: 'block', 
-                  fontSize: '20px',
-                  fontWeight: 600,
-                  marginBottom: '4px',
-                  color: '#222',
-                }}>
-                  {viewingContribution.contribution_name}
-                </Text>
-                <Tag color="blue">
-                  ID: {viewingContribution.contribution_id}
+            <div style={{ maxHeight: '70vh', overflowY: 'auto', padding: '24px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)', background: '#ffffff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', paddingBottom: '16px', borderBottom: '1px solid #e0e0e0' }}>
+                <div>
+                  <Text style={{ display: 'block', fontSize: '20px', fontWeight: 600, marginBottom: '4px', color: '#222' }}>
+                    {viewingContribution.contribution_name}
+                  </Text>
+                  <Tag color="blue">ID: {viewingContribution.contribution_id}</Tag>
+                </div>
+                <Tag color={viewingContribution.privacy_setting === 'public' ? 'green' : 'red'}>
+                  {viewingContribution.privacy_setting?.toUpperCase()}
                 </Tag>
               </div>
-              
-              <Tag color={viewingContribution.privacy_setting === 'public' ? 'green' : 'red'}>
-                {viewingContribution.privacy_setting?.toUpperCase()}
-              </Tag>
-            </div>
 
-            {/* Information Grid */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '24px',
-              marginBottom: '24px',
-            }}>
-              <div style={{
-        
-                borderRadius: '12px',
-                padding: '16px',
-                border: '1px solid #e0e0e0',
-              }}>
-                <Text strong style={{
-                  display: 'block',
-                  marginBottom: '12px',
-                  color: '#1976d2',
-                  fontSize: '16px',
-                }}>
-                  Temple Information
-                </Text>
-                
-                {viewingContribution.temple_id && (
-                  <div style={{ marginBottom: '12px' }}>
-                    <Text type="secondary" style={{ fontSize: '15px' }}>
-                      ID : 
-                    </Text>
-                    <Text style={{ fontSize: '14px',marginLeft:'8px' }}>
-                      {viewingContribution.temple_id}
-                    </Text>
-                  </div>
-                )}
-                
-                {viewingContribution.temple_name && (
-                  <div>
-                    <Text type="secondary" style={{ fontSize: '12px' }}>
-                      Name :
-                    </Text>
-                    <Text style={{ fontSize: '14px',marginLeft:'8px' }}>
-                      {viewingContribution.temple_name}
-                    </Text>
-                  </div>
-                )}
-              </div>
-              
-              <div style={{
-              
-                borderRadius: '12px',
-                padding: '16px',
-                border: '1px solid #e0e0e0',
-              }}>
-                <Text strong style={{
-                  display: 'block',
-                  marginBottom: '12px',
-                  color: '#1976d2',
-                  fontSize: '16px',
-                }}>
-                  Area
-                </Text>
-                
-                <div>
-                
-                  <Tag color="geekblue">
-                    {viewingContribution.category || 'N/A'}
-                  </Tag>
-                </div>
-              </div>
-            </div>
-
-            {/* Media Content Section */}
-            <div style={{
-
-              borderRadius: '12px',
-              padding: '16px',
-              marginBottom: '24px',
-              border: '1px solid #e0e0e0',
-            }}>
-              <Text strong style={{
-                display: 'block',
-                marginBottom: '16px',
-                color: '#1976d2',
-                fontSize: '16px',
-              }}>
-                Media Content
-              </Text>
-              
-              <div style={{
-                minHeight: '200px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: '#f0f0f0',
-                borderRadius: '8px',
-                border: '1px dashed #ccc',
-              }}>
-                {renderMediaContent(viewingContribution)}
-              </div>
-            </div>
-
-            {/* Share Link Section */}
-            <div style={{
-              borderRadius: '12px',
-              padding: '16px',
-              border: '1px solid #e0e0e0',
-            }}>
-              <Text strong style={{
-                display: 'block',
-                marginBottom: '16px',
-                color: '#1976d2',
-                fontSize: '16px',
-              }}>
-                Share Link
-              </Text>
-              
-              {viewingContribution.share_link ? (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  background: '#f5f5f5',
-                  borderRadius: '8px',
-                  padding: '10px 15px',
-                  border: '1px solid #d0d0ff',
-                }}>
-                  <LinkOutlined style={{ 
-                    marginRight: '10px', 
-                    color: '#1976d2',
-                    fontSize: '18px',
-                  }} />
-                  <a 
-                    href={viewingContribution.share_link} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    style={{ 
-                      wordBreak: 'break-all',
-                      color: '#1976d2',
-                      textDecoration: 'none',
-                      transition: 'all 0.3s',
-                      flex: 1,
-                      fontFamily: 'monospace',
-                      fontSize: '13px',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.color = '#0d47a1'}
-                    onMouseLeave={(e) => e.currentTarget.style.color = '#1976d2'}
-                  >
-                    {viewingContribution.share_link}
-                  </a>
-                </div>
-              ) : (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '10px 15px',
-                  background: '#f9f9f9',
-                  borderRadius: '8px',
-                  border: '1px dashed #ccc',
-                }}>
-                  <DisconnectOutlined style={{ 
-                    marginRight: '10px', 
-                    color: '#999',
-                    fontSize: '18px',
-                  }} />
-                  <Text type="secondary" style={{ fontStyle: 'italic' }}>
-                    No share link available
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                <div style={{ borderRadius: '12px', padding: '16px', border: '1px solid #e0e0e0' }}>
+                  <Text strong style={{ display: 'block', marginBottom: '12px', color: '#1976d2', fontSize: '16px' }}>
+                    Temple Information
                   </Text>
+                  {viewingContribution.temple_id && (
+                    <div style={{ marginBottom: '12px' }}>
+                      <Text type="secondary" style={{ fontSize: '15px' }}>ID :</Text>
+                      <Text style={{ fontSize: '14px', marginLeft: '8px' }}>{viewingContribution.temple_id}</Text>
+                    </div>
+                  )}
+                  {viewingContribution.temple_name && (
+                    <div>
+                      <Text type="secondary" style={{ fontSize: '12px' }}>Name :</Text>
+                      <Text style={{ fontSize: '14px', marginLeft: '8px' }}>{viewingContribution.temple_name}</Text>
+                    </div>
+                  )}
                 </div>
-              )}
+                
+                <div style={{ borderRadius: '12px', padding: '16px', border: '1px solid #e0e0e0' }}>
+                  <Text strong style={{ display: 'block', marginBottom: '12px', color: '#1976d2', fontSize: '16px' }}>
+                    Area
+                  </Text>
+                  <div>
+                    <Tag color="geekblue">{viewingContribution.category || 'N/A'}</Tag>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ borderRadius: '12px', padding: '16px', marginBottom: '24px', border: '1px solid #e0e0e0' }}>
+                <Text strong style={{ display: 'block', marginBottom: '16px', color: '#1976d2', fontSize: '16px' }}>
+                  Media Content
+                </Text>
+                <div style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f0f0', borderRadius: '8px', border: '1px dashed #ccc' }}>
+                  {renderMediaContent(viewingContribution)}
+                </div>
+              </div>
+
+              <div style={{ borderRadius: '12px', padding: '16px', border: '1px solid #e0e0e0' }}>
+                <Text strong style={{ display: 'block', marginBottom: '16px', color: '#1976d2', fontSize: '16px' }}>
+                  Share Link
+                </Text>
+                {viewingContribution.share_link ? (
+                  <div style={{ display: 'flex', alignItems: 'center', background: '#f5f5f5', borderRadius: '8px', padding: '10px 15px', border: '1px solid #d0d0ff' }}>
+                    <LinkOutlined style={{ marginRight: '10px', color: '#1976d2', fontSize: '18px' }} />
+                    <a 
+                      href={viewingContribution.share_link} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      style={{ wordBreak: 'break-all', color: '#1976d2', textDecoration: 'none', transition: 'all 0.3s', flex: 1, fontFamily: 'monospace', fontSize: '13px' }}
+                      onMouseEnter={(e) => e.currentTarget.style.color = '#0d47a1'}
+                      onMouseLeave={(e) => e.currentTarget.style.color = '#1976d2'}
+                    >
+                      {viewingContribution.share_link}
+                    </a>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', padding: '10px 15px', background: '#f9f9f9', borderRadius: '8px', border: '1px dashed #ccc' }}>
+                    <DisconnectOutlined style={{ marginRight: '10px', color: '#999', fontSize: '18px' }} />
+                    <Text type="secondary" style={{ fontStyle: 'italic' }}>No share link available</Text>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </Modal>
-
-      )}
-
+          </Modal>
+        )}
     </div>
   );
 };
