@@ -108,6 +108,9 @@ const useTempleStore = create<TempleState>((set) => ({
           message: string;
         };
 
+        console.log(json);
+        
+
         runningTotal += json.datas.length;
         next = json.is_next;
         p++;
