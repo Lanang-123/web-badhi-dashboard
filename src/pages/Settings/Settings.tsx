@@ -1,31 +1,22 @@
+// src/pages/Settings/Settings.tsx
+
 import React, { useState, useEffect } from "react";
-import {
-  Table,
-  Input,
-  Button,
-  Space,
-  Popconfirm,
-  Form,
-  Card,
-} from "antd";
+import { Table, Input, Button, Space, Popconfirm, Form, Card } from "antd";
+import type { TableProps, TableColumnType } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import styles from "./Settings.module.css";
-import useReconstructionStore from "../../store/useReconstructionStore";
+import useReconstructionStore, { ConfigItem, NewConfigPayload } from "../../store/useReconstructionStore";
 
-interface ConfigItem {
-  key: string;
-  value: string;
+// PERBAIKAN: Definisikan tipe kolom kustom yang menyertakan 'editable'
+interface EditableColumnType extends TableColumnType<ConfigItem> {
+  editable?: boolean;
 }
 
-interface SettingsProps {
-  onConfigsChange?: (configs: ConfigItem[]) => void;
-}
-
-// Editable cell component
+// EditableCell tidak berubah
 const EditableCell: React.FC<{
   editing: boolean;
   dataIndex: string;
-  title: string;
+  title: any;
   inputType: "text";
   record: ConfigItem;
   index: number;
@@ -48,33 +39,47 @@ const EditableCell: React.FC<{
   );
 };
 
-function Settings({ onConfigsChange }: SettingsProps) {
+function Settings() {
   const [form] = Form.useForm();
-  const configs = useReconstructionStore((state) => state.configs);
-  const addConfig = useReconstructionStore((state) => state.addConfig);
-  const updateConfig = useReconstructionStore((state) => state.updateConfig);
-  const removeConfig = useReconstructionStore((state) => state.removeConfig);
+  
+  const { configs, fetchConfigs, addConfig, updateConfig, removeConfig } = useReconstructionStore();
+  
+  const [dataSource, setDataSource] = useState<ConfigItem[]>([]);
   const [editingKey, setEditingKey] = useState<string>("");
 
   useEffect(() => {
-    onConfigsChange?.(configs);
-  }, [configs, onConfigsChange]);
+    fetchConfigs();
+  }, [fetchConfigs]);
 
-  const isEditing = (record: ConfigItem) => record.key === editingKey;
+  useEffect(() => {
+    setDataSource(configs);
+  }, [configs]);
 
-  const edit = (record: ConfigItem) => {
-    form.setFieldsValue({ key: record.key, value: record.value });
-    setEditingKey(record.key);
+  const isEditing = (record: ConfigItem) => record.id === editingKey;
+
+  const edit = (record: Partial<ConfigItem> & { id: string }) => {
+    form.setFieldsValue({ key: record.key || '', value: record.value || '' });
+    setEditingKey(record.id);
   };
 
   const cancel = () => {
+    if (editingKey.startsWith('temp-')) {
+      setDataSource(prevData => prevData.filter(item => item.id !== editingKey));
+    }
     setEditingKey("");
   };
 
-  const save = async (key: string) => {
+  const save = async (record: ConfigItem) => {
     try {
       const row = (await form.validateFields()) as ConfigItem;
-      updateConfig(key, row.value);
+      
+      if (record.id.startsWith('temp-')) {
+        // PERBAIKAN: Payload sekarang cocok dengan tipe NewConfigPayload di store
+        const payload: NewConfigPayload = { key: record.key, value: row.value };
+        await addConfig(payload);
+      } else {
+        await updateConfig(record.key, row.value, record.id);
+      }
       setEditingKey("");
     } catch (err) {
       console.error("Save failed:", err);
@@ -82,20 +87,24 @@ function Settings({ onConfigsChange }: SettingsProps) {
   };
 
   const addNewConfig = () => {
-    const newKey = `config_${Date.now()}`;
-    addConfig({ key: newKey, value: "" });
-    setEditingKey(newKey);
-    form.setFieldsValue({ key: newKey, value: "" });
+    if (editingKey) return;
+    const tempId = `temp-${Date.now()}`;
+    const newKey = `config_${dataSource.length + 1}`;
+    
+    const newItem: ConfigItem = { id: tempId, key: newKey, value: "" };
+    setDataSource([newItem, ...dataSource]);
+    edit(newItem);
   };
-
-  const columns = [
+  
+  // PERBAIKAN: Gunakan tipe kolom kustom 'EditableColumnType'
+  const columns: EditableColumnType[] = [
     {
       title: "Key",
       dataIndex: "key",
       editable: false,
     },
     {
-      title: "Value",
+      title: "Name Config",
       dataIndex: "value",
       editable: true,
     },
@@ -106,12 +115,10 @@ function Settings({ onConfigsChange }: SettingsProps) {
         const editable = isEditing(record);
         return editable ? (
           <Space>
-            <Button type="link" onClick={() => save(record.key)}>
-              Save
-            </Button>
-            <Button type="link" onClick={cancel}>
-              Cancel
-            </Button>
+            <Button type="link" onClick={() => save(record)}>Save</Button>
+            <Popconfirm title="Sure to cancel?" onConfirm={cancel}>
+              <Button type="link">Cancel</Button>
+            </Popconfirm>
           </Space>
         ) : (
           <Space>
@@ -120,9 +127,9 @@ function Settings({ onConfigsChange }: SettingsProps) {
             </Button>
             <Popconfirm
               title="Are you sure to delete?"
-              onConfirm={() => removeConfig(record.key)}
+              onConfirm={() => removeConfig(record.id)}
             >
-              <Button type="link" danger>
+              <Button type="link" danger disabled={editingKey !== ""}>
                 Delete
               </Button>
             </Popconfirm>
@@ -161,16 +168,12 @@ function Settings({ onConfigsChange }: SettingsProps) {
           Add Config
         </Button>
         <Table
-          components={{
-            body: {
-              cell: EditableCell,
-            },
-          }}
+          components={{ body: { cell: EditableCell } }}
           bordered
-          dataSource={configs}
-          columns={mergedColumns as any}
+          dataSource={dataSource}
+          columns={mergedColumns as TableProps<ConfigItem>['columns']}
           rowClassName="editable-row"
-          rowKey="key"
+          rowKey="id"
           pagination={false}
         />
       </Form>
@@ -179,4 +182,3 @@ function Settings({ onConfigsChange }: SettingsProps) {
 }
 
 export default Settings;
-export type { ConfigItem };

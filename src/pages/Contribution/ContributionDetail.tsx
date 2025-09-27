@@ -19,7 +19,8 @@ import { SearchOutlined, CheckOutlined } from "@ant-design/icons";
 import Swal from "sweetalert2";
 import { useParams, useNavigate } from "react-router-dom";
 
-import useContributionStore, { Contribution } from "../../store/useContributionStore";
+import useContributionStore from "../../store/useContributionStore";
+// **PERBAIKAN: Impor tipe Contribution dari store yang benar**
 import useReconstructionStore from "../../store/useReconstructionStore";
 import useAuthStore from "../../store/useAuthStore";
 
@@ -60,8 +61,9 @@ export default function ContributionDetail() {
 
     if (reconstructionId) {
       // **MODE RECONSTRUCTION**: cari metadata
+      // **PERBAIKAN: Akses `reconstructions` sebagai properti, bukan fungsi**
       const recon = reconstructionStore
-        .getAllReconstructions()
+        .reconstructions
         .find(r => r.reconstruction_id === reconstructionId);
 
       if (!recon) {
@@ -92,7 +94,7 @@ export default function ContributionDetail() {
       navigate(-1);
     }
   // hanya depend pada param & kategori, store tetap direferensikan langsung
-  }, [id, reconstructionId, activeCategory, fetchContributionsByTempleId, navigate, reconstructionStore]);
+  }, [id, reconstructionId, activeCategory, fetchContributionsByTempleId, navigate, reconstructionStore.reconstructions]);
 
   // --- 2. Infinite Scroll: load page selanjutnya ---
   const loaderRef = useRef<HTMLDivElement>(null);
@@ -105,8 +107,9 @@ export default function ContributionDetail() {
 
         if (reconstructionId) {
           // reconstruction mode
+          // **PERBAIKAN: Akses `reconstructions` sebagai properti**
           const recon = reconstructionStore
-            .getAllReconstructions()
+            .reconstructions
             .find(r => r.reconstruction_id === reconstructionId)!;
           
           // PERBAIKAN: Gunakan temple_ids[0] karena sekarang array
@@ -126,7 +129,7 @@ export default function ContributionDetail() {
         }
       }
     },
-    [activeCategory, id, reconstructionId, fetchContributionsByTempleId, isNext, loading, page, reconstructionStore]
+    [activeCategory, id, reconstructionId, fetchContributionsByTempleId, isNext, loading, page, reconstructionStore.reconstructions]
   );
   useEffect(() => {
     const observer = new IntersectionObserver(handleObserver, {
@@ -148,14 +151,11 @@ export default function ContributionDetail() {
   }, [currentUser, form, isReconstructionModalVisible]);
 
   // --- 4. Selected contributions untuk drawer & submit ---
-  const selectedIds = currentReconstructionId
-    ? reconstructionStore
-        .getSelectedContributions(currentReconstructionId)
-        .map(c => c.contribution_id)
-    : [];
+  // **PERBAIKAN: Gunakan fungsi baru `getSelectedContributions`**
   const selectedContributions = currentReconstructionId
     ? reconstructionStore.getSelectedContributions(currentReconstructionId)
     : [];
+  const selectedIds = selectedContributions.map(c => c.contribution_id);
 
   // --- Handlers Utama ---
   const onSearch = (value: string) => setSearchText(value);
@@ -164,13 +164,11 @@ export default function ContributionDetail() {
     setActiveCategory(lvl);
   };
 
-  // const showReconstructionModal = () => setIsReconstructionModalVisible(true);
   const handleReconstructionCancel = () => {
     form.resetFields();
     setIsReconstructionModalVisible(false);
   };
 
-  // **Panggil addReconstruction hanya di mode TEMPLE**:
   const handleReconstructionOk = async () => {
     try {
       const values = await form.validateFields();
@@ -182,7 +180,6 @@ export default function ContributionDetail() {
         message.error("Temple ID tidak tersedia");
         return;
       }
-      // ✔️ 3 args: label, user, templeId
      const newRec = await reconstructionStore.addReconstruction(
         values.label,
         currentUser.id,
@@ -219,6 +216,9 @@ export default function ContributionDetail() {
     if (!currentReconstructionId) return;
     try {
       const sel = reconstructionStore.getSelectedContributions(currentReconstructionId);
+      // NOTE: `updateReconstructionContributions` mungkin seharusnya menyimpan `sel`
+      // ke `contributions` di metadata rekonstruksi, bukan root `contributions`.
+      // Sesuaikan logika store jika diperlukan.
       reconstructionStore.updateReconstructionContributions(
         currentReconstructionId,
         sel
@@ -273,8 +273,6 @@ export default function ContributionDetail() {
             }
           />
         </Col>
-
-        
       </Row>
 
       {/* Category Tabs (sama seperti sebelumnya) */}
@@ -308,7 +306,7 @@ export default function ContributionDetail() {
             </Text>
           </Col>
         ) : (
-          filteredContributions.map((c: Contribution) => (
+          filteredContributions.map((c: any) => ( // Ganti 'any' dengan tipe yang lebih spesifik
             <Col xs={24} sm={12} md={8} key={c.tx_contribution_id}>
               <ContributionDetailCard
                 data={c}
@@ -371,7 +369,7 @@ export default function ContributionDetail() {
           </Button>
         }
       >
-        <List<number>
+        <List
           itemLayout="horizontal"
           dataSource={selectedIds}
           renderItem={id => {

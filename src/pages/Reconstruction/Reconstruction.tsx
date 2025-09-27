@@ -32,14 +32,12 @@ import styles from './Reconstruction.module.css';
 import GroupManagement from './GroupManagement';
 import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
-// import moment, { Moment } from 'moment';
 import dayjs, { Dayjs } from 'dayjs';
-// import FileUploadModel from '../../components/Reconstruction/FileUploadModel';
+import StagedContributionsCounter from './StagedContributionsCounter';
 
 interface ReconstructionProps {
   reconstructionId: string;
 }
-
 
 const { TabPane } = Tabs;
 const { Option } = Select;
@@ -48,40 +46,18 @@ const { Title, Text } = Typography;
 export type Level = 'nista' | 'madya' | 'utama' | 'other' | 'all';
 
 const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => {
-    // Configuration state
   const [selectedKey, setSelectedKey] = useState<string | undefined>(undefined);
- 
-
- 
   const [filterDate, setFilterDate] = useState<Dayjs | null>(dayjs());
   const reconStore = useReconstructionStore();
   const [selectedRecons, setSelectedRecons] = useState<string[]>([]);
-  // const [uploadModalVisible, setUploadModalVisible] = useState(false);
-  // const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
-   
-   
-  // Load global configs
   const configs = useReconstructionStore(state => state.configs);
   const setReconstructionConfig = useReconstructionStore(state => state.setReconstructionConfig);
-
- 
-
- 
- 
-
-
-  
   const templeStore = useTempleStore();
   const contribStore = useContributionStore();
   const [, setSearchText] = useState('');
-
-  const {user} = useAuthStore();
-
+  const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'1' | 'grouping' | 'configuration'>('1');
   const [activeReconstruction, setActiveReconstruction] = useState<string | null>(null);
-  // const [uploading, setUploading] = useState(false);
-
-  // State for create reconstruction flow
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [, setShowContribModal] = useState(false);
   const [selectedTempleIds, setSelectedTempleIds] = useState<number[]>([]);
@@ -89,37 +65,35 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
   const [, setActiveCategory] = useState<Level>('all');
   const [, setPage] = useState(1);
   const [, setSelectedContribIds] = useState<number[]>([]);
-
-  // State for add contributions to existing reconstruction
   const [addContribModalVisible, ] = useState(false);
   const [currentReconstructionId, ] = useState<string | null>(null);
   const [addContribActiveCategory] = useState<Level>('nista');
   const [addContribPage, setAddContribPage] = useState(1);
-  // const [, setAddContribSelectedIds] = useState<number[]>([]);
-  // const [, setAddContribSearchText] = useState('');
-
-  // State for pagination and search
   const [templePage, setTemplePage] = useState(1);
-  const [] = useState(5); // Fixed page size for temples
-  // const [templeTotal, setTempleTotal] = useState(0);
-   const [templeSearchText, setTempleSearchText] = useState('');
+  const [templeSearchText, setTempleSearchText] = useState('');
   const [debouncedTempleSearchText, ] = useState('');
-  // const [searchTimeout, setSearchTimeout] = useState<number | null>(null); // Perbaikan di si
   const [loadingTemples, setLoadingTemples] = useState(false);
   const [, setLoadingContributions] = useState(false);
   const [, setLoadingAddContributions] = useState(false);
-
   const loaderRef = useRef<HTMLDivElement>(null);
   const addContribLoaderRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-
   const targetReconstructionId = activeTab === '1' ? reconstructionId : activeReconstruction;
- 
+  const apiUrl = import.meta.env.VITE_API_URL as string;
+  const apiRecons = import.meta.env.VITE_API_RECONSTRUCTION_URL;
 
- const apiUrl = import.meta.env.VITE_API_URL as string;
- const apiRecons = import.meta.env.VITE_API_RECONSTRUCTION_URL;
-
-//  const dteParam = filterDate?.format('YYYYMMDD') ?? '';
+  useEffect(() => {
+    const loadConfigsIfNeeded = async () => {
+      if (activeTab === 'configuration' && reconStore.configs.length === 0) {
+        try {
+          await reconStore.fetchConfigs();
+        } catch (error) {
+          message.error('Failed to load configuration data.');
+        }
+      }
+    };
+    loadConfigsIfNeeded();
+  }, [activeTab, reconStore]);
 
   useEffect(() => {
     const fetchRecons = async () => {
@@ -128,10 +102,6 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
         return;
       }
       const month = filterDate.format('YYYYMM');
-
-      
-
-      // Ambil token dari localStorage
       let token: string | null = null;
       try {
         const authRaw = localStorage.getItem('auth-storage');
@@ -142,15 +112,12 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
       } catch {
         token = null;
       }
-
-      // Siapkan headers, sertakan Authorization kalau ada token
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-
       try {
         const res = await fetch(`${apiRecons}?month=${month}`, {
           method: 'GET',
@@ -160,14 +127,11 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
           error?: string;
           datas?: ReconstructionMetadata[];
         };
-        console.log('payload:', payload);
-
         if (payload.error) {
           message.error(payload.error);
           reconStore.setReconstructions([]);
           return;
         }
-
         const datas = payload.datas ?? [];
         const mappedData = datas.map(rec => ({
           ...rec,
@@ -182,7 +146,6 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
             }))
           }))
         }));
-
         reconStore.setReconstructions(mappedData);
       } catch (err) {
         console.error('Failed to fetch reconstructions:', err);
@@ -190,69 +153,54 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
         reconStore.setReconstructions([]);
       }
     };
-
     fetchRecons();
   }, [filterDate]);
 
-
-
-
- const rec = useReconstructionStore(state =>
+  const rec = useReconstructionStore(state =>
     state.reconstructions.find(r => r.reconstruction_id === targetReconstructionId)
   );
 
   useEffect(() => {
-  if (activeTab === 'configuration' && rec && rec.configuration) {
-    setSelectedKey(rec.configuration.key);
-  } else {
-    setSelectedKey(undefined);
-  }
-}, [activeTab, rec, configs]); // Tambahkan configs sebagai dependency
+    if (activeTab === 'configuration' && rec && rec.configuration) {
+      setSelectedKey(rec.configuration.key);
+    } else {
+      setSelectedKey(undefined);
+    }
+  }, [activeTab, rec, configs]);
 
   const handleConfigSubmit = async () => {
-      if (!rec) {
-        message.error('Reconstruction tidak ditemukan');
-        return;
-      }
-      if (!selectedKey) {
-        message.warning('Silakan pilih konfigurasi');
-        return;
-      }
-      
-      const config = configs.find(c => c.key === selectedKey)!;
-      setReconstructionConfig(rec.reconstruction_id, config);
+    if (!rec) {
+      message.error('Reconstruction tidak ditemukan');
+      return;
+    }
+    if (!selectedKey) {
+      message.warning('Silakan pilih konfigurasi');
+      return;
+    }
+    const config = configs.find(c => c.key === selectedKey)!;
+    setReconstructionConfig(rec.reconstruction_id, config);
+    try {
+      await reconStore.postReconstructionForAPI(rec.reconstruction_id);
+      Swal.fire({
+        title: 'Success!',
+        text: 'Reconstruction saved successfully!',
+        icon: 'success',
+        timer: 1500,
+        showConfirmButton: false
+      });
+      navigate('/reconstructions');
+    } catch (error) {
+      console.log(error);
+      Swal.fire({
+        title: 'Error!',
+        text: 'Failed to save reconstruction',
+        icon: 'error',
+        timer: 1500,
+        showConfirmButton: false
+      });
+    }
+  };
 
-      try {
-        // Panggil fungsi POST
-        await reconStore.postReconstructionForAPI(rec.reconstruction_id);
-       
-        
-        Swal.fire({
-          title: 'Success!',
-          text: 'Reconstruction saved successfully!',
-          icon: 'success',
-          timer: 1500,
-          showConfirmButton: false
-        });
-        
-        // Navigasi kembali jika perlu
-        navigate('/reconstructions');
-      } catch (error) {
-        console.log(error);
-        
-        Swal.fire({
-          title: 'Error!',
-          text: 'Failed to save reconstruction',
-          icon: 'error',
-          timer: 1500,
-          showConfirmButton: false
-        });
-      }
-    
-    };
-
-  
-   // Helper: ambil JWT token dari localStorage
   const getAuthToken = (): string | null => {
     try {
       const raw = localStorage.getItem('auth-storage');
@@ -265,14 +213,11 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
     }
   };
 
-  // Fungsi untuk unduh satu reconstruction
   const handleDownload = async (rec: any) => {
     const dateParam = filterDate?.format('YYYYMM');
     const token = getAuthToken();
-
-    const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-
     try {
       const res = await fetch(
         `${apiRecons}/download/${rec.reconstruction_id}?month=${dateParam}`,
@@ -280,9 +225,8 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
       );
       if (!res.ok) throw new Error(`Status ${res.status}`);
       const data = await res.json();
-
-      // Trigger download
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const { temple_ids, ...dataToSave } = data;
+      const blob = new Blob([JSON.stringify(dataToSave, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -297,15 +241,12 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
     }
   };
 
-  // Fungsi untuk unduh semua berdasarkan tanggal
   const handleDownloadAllByDate = async () => {
     if (!filterDate) return;
     const dateParam = filterDate.format('YYYYMM');
     const token = getAuthToken();
-
-    const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-
     try {
       const res = await fetch(
         `${apiRecons}/download?month=${dateParam}`,
@@ -313,8 +254,11 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
       );
       if (!res.ok) throw new Error(`Status ${res.status}`);
       const data = await res.json();
-
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const formattedData = data.map((item: ReconstructionMetadata) => {
+        const { temple_ids, ...rest } = item;
+        return rest;
+      });
+      const blob = new Blob([JSON.stringify(formattedData, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -329,21 +273,17 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
     }
   };
 
-  // Handle batch download of selected reconstructions
   const handleDownloadSelected = async () => {
     if (!filterDate || selectedRecons.length === 0) return;
     const dateParam = filterDate.format('YYYYMM');
     const token = getAuthToken();
-
-    const headers: Record<string,string> = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json'
     };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-
     try {
       const res = await fetch(
-        `${apiRecons}/download/multiple?month=${dateParam}`,
-        {
+        `${apiRecons}/download/multiple?month=${dateParam}`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ ids: selectedRecons }),
@@ -354,8 +294,11 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
         throw new Error(err.message || `Status ${res.status}`);
       }
       const data: ReconstructionMetadata[] = await res.json();
-
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const formattedData = data.map((item: ReconstructionMetadata) => {
+        const { temple_ids, ...rest } = item;
+        return rest;
+      });
+      const blob = new Blob([JSON.stringify(formattedData, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -370,44 +313,19 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
     }
   };
 
-
-
   const toggleSelectRecon = (id: string) => {
     setSelectedRecons(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
   };
 
-  
-
   const reconstructionsToShow = reconStore.reconstructions;
-  // Debounce untuk pencarian temple
-  // useEffect(() => {
-  //   if (searchTimeout) {
-  //     window.clearTimeout(searchTimeout);
-  //   }
 
-  //   const timeout = window.setTimeout(() => {
-  //     setDebouncedTempleSearchText(templeSearchText);
-  //   }, 300); // 300ms debounce time
-
-  //   setSearchTimeout(timeout);
-
-  //   return () => {
-  //     if (searchTimeout) {
-  //       window.clearTimeout(searchTimeout);
-  //     }
-  //   };
-  // }, [templeSearchText]);
-
-  // Fetch temples with pagination
   useEffect(() => {
     if (!createModalVisible) return;
-
     const load = async () => {
       try {
         setLoadingTemples(true);
-        // Gunakan templePage dan templeSearchText langsung
         await templeStore.fetchTemples(templePage, templeSearchText);
       } catch {
         message.error('Failed to fetch temples');
@@ -415,11 +333,9 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
         setLoadingTemples(false);
       }
     };
-
     load();
-  }, [createModalVisible, templePage, templeSearchText]); // Gunakan templeSearchText
+  }, [createModalVisible, templePage, templeSearchText]);
 
-  // Reset state when create modal opens
   useEffect(() => {
     if (createModalVisible) {
       setTemplePage(1);
@@ -433,25 +349,17 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
     }
   }, [createModalVisible]);
 
-
-  
-
-  // Fetch contributions for add contributions modal
   useEffect(() => {
     if (!addContribModalVisible || !currentReconstructionId) return;
-    
     const reconstruction = reconStore.reconstructions.find(
       r => r.reconstruction_id === currentReconstructionId
     );
-    
     if (!reconstruction) {
       message.error('Reconstruction not found');
       return;
     }
-    
-  const fetchContributions = async () => {
+    const fetchContributions = async () => {
       if (!reconstruction.temple_ids || reconstruction.temple_ids.length === 0) return;
-
       setLoadingAddContributions(true);
       try {
         for (const templeId of reconstruction.temple_ids) {
@@ -465,43 +373,31 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
         setLoadingAddContributions(false);
       }
     };
-
-
     fetchContributions();
-  }, [addContribModalVisible, currentReconstructionId, addContribPage, addContribActiveCategory]);
+  }, [addContribModalVisible, currentReconstructionId, addContribPage, addContribActiveCategory, contribStore, reconStore.reconstructions]);
 
-  // Intersection observers for infinite scroll
-  const handleCreateObserver = useCallback(
-    (entries: IntersectionObserverEntry[]) => {
-      const target = entries[0];
-      if (target.isIntersecting && !contribStore.loading && contribStore.isNext) {
-        setPage(prevPage => prevPage + 1);
-      }
-    },
-    [contribStore.loading, contribStore.isNext]
-  );
+  const handleCreateObserver = useCallback((entries: IntersectionObserverEntry[]) => {
+    const target = entries[0];
+    if (target.isIntersecting && !contribStore.loading && contribStore.isNext) {
+      setPage(prevPage => prevPage + 1);
+    }
+  }, [contribStore.loading, contribStore.isNext]);
 
-  const handleAddContribObserver = useCallback(
-    (entries: IntersectionObserverEntry[]) => {
-      const target = entries[0];
-      if (target.isIntersecting && !contribStore.loading && contribStore.isNext) {
-        setAddContribPage(prevPage => prevPage + 1);
-      }
-    },
-    [contribStore.loading, contribStore.isNext]
-  );
+  const handleAddContribObserver = useCallback((entries: IntersectionObserverEntry[]) => {
+    const target = entries[0];
+    if (target.isIntersecting && !contribStore.loading && contribStore.isNext) {
+      setAddContribPage(prevPage => prevPage + 1);
+    }
+  }, [contribStore.loading, contribStore.isNext]);
 
-  // Setup intersection observers
   useEffect(() => {
     const createObserver = new IntersectionObserver(handleCreateObserver, {
       threshold: 0.1,
     });
-
     const currentLoaderRef = loaderRef.current;
     if (currentLoaderRef) {
       createObserver.observe(currentLoaderRef);
     }
-
     return () => {
       if (currentLoaderRef) {
         createObserver.unobserve(currentLoaderRef);
@@ -509,81 +405,14 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
     };
   }, [handleCreateObserver]);
 
-  // const handleUploadFiles = async (files: {
-  //   model_files: UploadFile[];
-  //   log?: UploadFile;
-  //   eval?: UploadFile;
-  //   nerfstudio_data?: UploadFile;
-  //   nerfstudio_model?: UploadFile;
-  // }) => {
-  //   if (!rec || !currentGroupId) return;
-    
-  //   setUploading(true);
-  //   try {
-  //     const dateParam = filterDate?.format('YYYYMMDD') ?? '';
-  //     const success = await reconStore.uploadGroupModel(
-  //       rec.reconstruction_id,
-  //       currentGroupId,
-  //       '',
-  //       files,
-  //       dateParam
-  //     );
-      
-  //     if (success) {
-  //       message.success('Files uploaded successfully');
-  //       setUploadModalVisible(false);
-  //     } else {
-  //       message.error('Failed to upload files');
-  //     }
-  //   } catch (error) {
-  //     console.error('Upload error:', error);
-  //     message.error('Failed to upload files');
-  //   } finally {
-  //     setUploading(false);
-  //   }
-  // };
-
-  // Efek untuk mengambil kontribusi dari semua temple terpilih
-// useEffect(() => {
-//   if (!showContribModal || selectedTempleIds.length === 0) return;
-
-//   const fetchAllContributions = async () => {
-//     setLoadingContributions(true);
-//     try {
-//       const contributions: Contribution[] = [];
-      
-//       for (const templeId of selectedTempleIds) {
-//         // Reset store sebelum fetch baru
-//         contribStore.contributions = [];
-//         await contribStore.fetchContributionsByTempleId(
-//           templeId,
-//           1,
-//           activeCategory === 'other' ? 'other' : activeCategory
-//         );
-        
-//         // Tambahkan ke gabungan
-//         contributions.push(...contribStore.contributions);
-//       }
-      
-//       setAllContributions(contributions);
-//     } finally {
-//       setLoadingContributions(false);
-//     }
-//   };
-
-//   fetchAllContributions();
-// }, [selectedTempleIds, activeCategory]);
-
   useEffect(() => {
     const addContribObserver = new IntersectionObserver(handleAddContribObserver, {
       threshold: 0.1,
     });
-
     const currentAddContribLoaderRef = addContribLoaderRef.current;
     if (currentAddContribLoaderRef) {
       addContribObserver.observe(currentAddContribLoaderRef);
     }
-
     return () => {
       if (currentAddContribLoaderRef) {
         addContribObserver.unobserve(currentAddContribLoaderRef);
@@ -591,272 +420,131 @@ const Reconstruction: React.FC<ReconstructionProps> = ({ reconstructionId }) => 
     };
   }, [handleAddContribObserver]);
 
-  
+  const handleSave = async () => {
+    if (selectedTempleIds.length === 0) {
+      message.error('Pilih minimal satu temple');
+      return;
+    }
+    if (!label.trim()) {
+      message.error('Masukkan label reconstruction');
+      return;
+    }
+    setLoadingContributions(true);
+    try {
+      const allContributions: Contribution[] = [];
+      for (const templeId of selectedTempleIds) {
+        let page = 1;
+        let hasData = true;
+        while (hasData) {
+          const url = new URL(`${apiUrl}/private/contributions/list/${templeId}`);
+          url.searchParams.append('page', String(page));
+          const res = await fetch(url.toString(), {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(useAuthStore.getState().token ?
+                { Authorization: `Bearer ${useAuthStore.getState().token}` } :
+                {}),
+            },
+          });
+          if (!res.ok) {
+            const errorBody = await res.text();
+            throw new Error(`HTTP ${res.status}: ${errorBody}`);
+          }
+          const data = await res.json();
+           console.log("DATA MENTAH DARI API KONTRIBUSI:", data.datas);
+          const raw: any[] = Array.isArray(data.datas) ? data.datas : [];
+          
+          const pageItems: Contribution[] = raw.map(d => ({
+            tx_contribution_id: d.tx_contribution_id,
+            md_temples_id: d.md_temples_id,
+            user_id: d.user_id,
+            name: d.name,
+            description: d.description,
+            level_area: d.level_area,
+            file_path: d.file_path,
+            thumbnail: d.thumbnail,
+            lat: d.lat,
+            lng: d.lng,
+            created_at: d.created_at,
+            updated_at: d.updated_at,
+            deleted_at: d.deleted_at,
+            license_type: d.license_type,
+            avatar: d.avatar || '',
+            user_name: d.user_name || '',
+            category: d.level_area || 'other',
+            privacy_setting: d.license_type === 1 ? 'public' : 'private',
+          }));
+          
+          allContributions.push(...pageItems);
 
-  // Save Reconstruction
-  // Ubah handleSave untuk membuat SATU reconstruction
-const handleSave = async () => {
-  if (selectedTempleIds.length === 0) {
-    message.error('Pilih minimal satu temple');
-    return;
-  }
-  if (!label.trim()) {
-    message.error('Masukkan label reconstruction');
-    return;
-  }
-
-  setLoadingContributions(true);
-
-  try {
-    // Tempat menampung seluruh kontribusi dari semua temple
-    const allContributions: Contribution[] = [];
-
-    for (const templeId of selectedTempleIds) {
-      let page = 1;
-      let totalFetched = 0;
-      const maxPages = 10; // untuk mencegah infinite loop
-      let hasData = true;
-
-      while (hasData && page <= maxPages) {
-        const url = new URL(`${apiUrl}/private/contributions/list/${templeId}`);
-        url.searchParams.append('page', String(page));
-
-        // Debug URL jika perlu
-        // console.log('Request URL:', url.toString());
-
-        const res = await fetch(url.toString(), {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(useAuthStore.getState().token
-              ? { Authorization: `Bearer ${useAuthStore.getState().token}` }
-              : {}),
-          },
-        });
-
-        if (!res.ok) {
-          const errorBody = await res.text();
-          throw new Error(`HTTP ${res.status}: ${errorBody}`);
+          if (!data.is_next) {
+            hasData = false;
+          }
+          page++;
         }
-
-        const data = await res.json();
-        const raw: any[] = Array.isArray(data.datas) ? data.datas : [];
-
-        // Hentikan loop jika tidak ada data lagi
-        if (raw.length === 0) {
-          hasData = false;
-          break;
-        }
-
-        // Map ke model Contribution
-        const pageItems: Contribution[] = raw.map(d => ({
-          tx_contribution_id: d.tx_contribution_id,
-          md_temples_id: d.md_temples_id,
-          user_id: d.user_id,
-          name: d.name,
-          description: d.description,
-          level_area: d.level_area,
-          file_path: d.file_path,
-          thumbnail: d.thumbnail,
-          lat: d.lat,
-          lng: d.lng,
-          created_at: d.created_at,
-          updated_at: d.updated_at,
-          deleted_at: d.deleted_at,
-          license_type: d.license_type,
-          avatar: d.avatar || '',
-          user_name: d.user_name || '',
-          category: d.level_area || 'other',
-          privacy_setting: d.license_type === 1 ? 'public' : 'private',
-        }));
-
-        allContributions.push(...pageItems);
-        totalFetched += pageItems.length;
-
-        console.log(`Temple ${templeId} - Halaman ${page}: ${pageItems.length} items`);
-        page++;
       }
 
-      console.log(`Total untuk temple ${templeId}: ${totalFetched} kontribusi`);
+      // PERBAIKAN FINAL ADA DI SINI:
+      const selectedContribsForRecon = allContributions.map(c => {
+        const temple = templeStore.temples.find(
+          t => t.md_temples_id === c.md_temples_id
+        );
+        return {
+          contribution_id: c.tx_contribution_id,
+          contribution_name: c.name,
+          temple_name: temple?.name || `Temple ${c.md_temples_id}`,
+          share_link: c.file_path,
+          privacy_setting: c.privacy_setting,
+          category: c.category,
+          temple_id: c.md_temples_id,
+          user_id: c.user_id, // Kita hanya butuh user_id di sini
+        };
+      });
+
+      if (user != null) {
+        const newRec = await reconStore.addReconstruction(
+          label,
+          user.id,
+          selectedTempleIds
+        );
+        reconStore.updateReconstructionContributions(
+          newRec.reconstruction_id,
+          selectedContribsForRecon
+        );
+        setCreateModalVisible(false);
+        setActiveReconstruction(newRec.reconstruction_id);
+        setActiveTab('grouping');
+      }
+    } catch (err) {
+      console.error('Failed to create reconstruction', err);
+      Swal.fire({
+        title: 'Error!',
+        text: 'Failed to create reconstruction. Please try again.',
+        icon: 'error',
+        timer: 1500,
+        showConfirmButton: false
+      });
+    } finally {
+      setLoadingContributions(false);
     }
+  };
 
-    // Filter kontribusi yang user pilih
-    // const filtered = allContributions.filter(c =>
-    //   selectedContribIds.includes(c.tx_contribution_id)
-    // );
-    
-
-    
-
-    // Map ke bentuk yang diharapkan store reconstruction
-    const selectedContribsForRecon = allContributions.map(c => {
-      const temple = templeStore.temples.find(
-        t => t.md_temples_id === c.md_temples_id
-      );
-      return {
-        contribution_id: c.tx_contribution_id,
-        temple_name: temple?.name || `Temple ${c.md_temples_id}`,
-        contribution_name: c.name,
-        share_link: c.file_path,
-        privacy_setting: c.privacy_setting,
-        category: c.category,
-        temple_id: c.md_temples_id
-      };
-    });
-    
-    if(user != null) {
-      console.log(user);
-      
-        // // Buat satu reconstruction untuk semua temple
-      const newRec = await reconStore.addReconstruction(
-        label,
-        user.id,
-        selectedTempleIds
-      );
-
-      // // Simpan semua kontribusi terpilih
-      reconStore.updateReconstructionContributions(
-        newRec.reconstruction_id,
-        selectedContribsForRecon
-      );
-
-
-      setCreateModalVisible(false);
-      setActiveReconstruction(newRec.reconstruction_id);
-      setActiveTab('grouping');
-      
-    } 
-
-  
-    // Swal.fire({
-    //   title: 'Created!',
-    //   text: `Reconstruction "${label}" has been created with ${selectedTempleIds.length} temple(s) and ${selectedContribsForRecon.length} contribution(s).`,
-    //   icon: 'success',
-    //   timer: 1500,
-    //   showConfirmButton: false
-    // });
-
-
-  } catch (err) {
-    console.error('Failed to create reconstruction', err);
-    Swal.fire({
-      title: 'Error!',
-      text: 'Failed to create reconstruction. Please try again.',
-      icon: 'error',
-      timer: 1500,
-      showConfirmButton: false
-    });
-  } finally {
-    setLoadingContributions(false);
-  }
-};
-
-
-
-
-  // Handle add contributions to existing reconstruction
-  // const handleAddContributionsSave = () => {
-  //   if (!currentReconstructionId) return;
-
-  //   // Map contributions to reconstruction-store shape
-  //   const selectedContribsForRecon = contribStore.contributions
-  //     .filter(c => addContribSelectedIds.includes(c.tx_contribution_id))
-  //     .map(c => ({
-  //       contribution_id: c.tx_contribution_id,
-  //       contribution_name: c.name,
-  //       temple_name: c.name,
-  //       share_link: c.file_path,
-  //       privacy_setting: c.license_type === 1 ? 'public' : 'private'
-  //     }));
-
-  //   // Add selected contributions to reconstruction
-  //   const currentContributions = reconStore.reconstructions.find(
-  //     r => r.reconstruction_id === currentReconstructionId
-  //   )?.contributions || [];
-    
-  //   const newContributions = [
-  //     ...currentContributions,
-  //     ...selectedContribsForRecon.filter(newContrib => 
-  //       !currentContributions.some(
-  //         existing => existing.contribution_id === newContrib.contribution_id
-  //       )
-  //     )
-  //   ];
-
-  //   reconStore.updateReconstructionContributions(currentReconstructionId, newContributions);
-
-  //   message.success('Contributions added successfully');
-  //   setAddContribModalVisible(false);
-  //   setAddContribSelectedIds([]);
-  // };
-
-  // Handle temple search
   const handleTempleSearch = (value: string) => {
-    setTemplePage(1); // Reset ke halaman pertama
+    setTemplePage(1);
     setTempleSearchText(value);
   };
 
-  // Handle temple selection
- const handleTempleSelect = (id: number) => {
- setSelectedTempleIds(prev =>
-    prev.includes(id) ? prev.filter(tid => tid !== id) : [...prev, id]
-  );
-  setShowContribModal(true);
-  setPage(1);
-  setSelectedContribIds([]);
-};
+  const handleTempleSelect = (id: number) => {
+    setSelectedTempleIds(prev =>
+      prev.includes(id) ? prev.filter(tid => tid !== id) : [...prev, id]
+    );
+    setShowContribModal(true);
+    setPage(1);
+    setSelectedContribIds([]);
+  };
 
+  const configDisabled = !rec || (rec.groups || []).length === 0 || rec.status !== 'ready';
 
-  // Open add contributions modal
-//  const openAddContribModal = (reconstructionId: string) => {
-//     const reconstruction = reconStore.reconstructions.find(
-//       r => r.reconstruction_id === reconstructionId
-//     );
-//     if (!reconstruction) {
-//       message.error('Reconstruction not found');
-//       return;
-//     }
-
-//     setCurrentReconstructionId(reconstructionId);
-
-//     // Sesuaikan dengan tipe array
-//     setSelectedTempleIds(reconstruction.temple_ids);
-
-//     // Inisialisasi selected contributions
-//     const existingIds = reconstruction.contributions.map(c => c.contribution_id);
-//     setAddContribSelectedIds(existingIds);
-
-//     setAddContribPage(1);
-//     setAddContribActiveCategory('nista');
-//     setAddContribSearchText('');
-//     setAddContribModalVisible(true);
-//   };
-
-
-  // const totalContribs = rec?.groups.reduce(
-  //     (sum, g) => sum + g.contributions.length,
-  //     0
-  //   );
-
-
-  // Close all modals
-  // const closeAllModals = () => {
-  //   setCreateModalVisible(false);
-  //   setShowContribModal(false);
-  //   setSelectedTempleIds([]); // ← perbaikan di sini
-  //   setLabel('');
-  //   setSelectedContribIds([]);
-  //   setTemplePage(1);
-  //   setTempleSearchText('');
-  // };
-
-
-   // Disable config tab if no groups
-  // Menjadi:
-    const configDisabled = !rec || rec.groups.length === 0 || rec.status !== 'ready';
-    // const isReady       = rec?.status === 'ready';
-    // const deleteDisabled = !rec || isReady;
-    
-      
   return (
     <>
       <div className={styles.reconstructionContainer}>
@@ -866,56 +554,40 @@ const handleSave = async () => {
           onChange={key => setActiveTab(key as '1' | 'grouping' | 'configuration')}
           tabBarStyle={{ marginBottom: 24 }}
         >
-          {/* Tab 1: Reconstructions List */}
           <TabPane tab="Reconstructions" key="1">
-              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                {/* <Button onClick={() => setFilterDate(moment())}>Today</Button> */}
-                <Text style={{ marginTop: '4px' }}>Month :</Text>
-                <DatePicker value={filterDate} onChange={setFilterDate} allowClear format="MMMM YYYY" picker="month"/>
-               {reconstructionsToShow.length === 0 ? (
-                  <Button
-                    type="default"
-                    icon={<CloudDownloadOutlined />}
-                    onClick={handleDownloadAllByDate}
-                    disabled={true}
-                    style={{ marginLeft: 8 }}
-                  >
-                    Download JSON All
-                  </Button>
-                ) : (
-                  <Button
-                    type="default"
-                    icon={<CloudDownloadOutlined />}
-                    onClick={handleDownloadAllByDate}
-                    disabled={!filterDate}
-                    style={{ marginLeft: 8 }}
-                  >
-                    Download JSON All
-                  </Button>
-                )}
-
-                <Button onClick={handleDownloadSelected} disabled={selectedRecons.length === 0}>
-                  Download JSON Selected ({selectedRecons.length})
-                </Button>
-                  <Button
-                    type="primary"
-                    icon={<DeliveredProcedureOutlined />}
-                    onClick={() => setCreateModalVisible(true)}
-                    style={{ backgroundColor:"#772d2f",marginLeft:'24rem' }}
-                  >
-                    Add Reconstruction
-                  </Button>
-              </div>
-
-              {reconstructionsToShow.length > 0 ? (
-                <List
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <Text style={{ marginTop: '4px' }}>Month :</Text>
+              <DatePicker value={filterDate} onChange={setFilterDate} allowClear format="MMMM YYYY" picker="month" />
+              <Button
+                type="default"
+                icon={<CloudDownloadOutlined />}
+                onClick={handleDownloadAllByDate}
+                disabled={reconstructionsToShow.length === 0 || !filterDate}
+                style={{ marginLeft: 8 }}
+              >
+                Download JSON All
+              </Button>
+              <Button onClick={handleDownloadSelected} disabled={selectedRecons.length === 0}>
+                Download JSON Selected ({selectedRecons.length})
+              </Button>
+              <Button
+                type="primary"
+                icon={<DeliveredProcedureOutlined />}
+                onClick={() => setCreateModalVisible(true)}
+                style={{ backgroundColor: "#772d2f", marginLeft: 'auto' }}
+              >
+                Add Reconstruction
+              </Button>
+            </div>
+            {reconstructionsToShow.length > 0 ? (
+              <List
                 itemLayout="horizontal"
                 dataSource={reconstructionsToShow}
                 pagination={{ pageSize: 5, showSizeChanger: false }}
                 style={{ border: '1px solid #f0f0f0', borderRadius: 4 }}
                 renderItem={rec => {
-                  const totalContribs = rec.groups.reduce(
-                    (sum, g) => sum + g.contributions.length, 
+                  const totalContribs = (rec.groups || []).reduce(
+                    (sum, g) => sum + (g.contributions || []).length,
                     0
                   );
                   return (
@@ -928,9 +600,7 @@ const handleSave = async () => {
                         onChange={() => toggleSelectRecon(rec.reconstruction_id)}
                         style={{ marginRight: 12 }}
                       />
-
                       <List.Item.Meta
-                      
                         title={<Text strong>{rec.label}</Text>}
                         description={
                           <div>
@@ -944,94 +614,78 @@ const handleSave = async () => {
                               Status: {rec.status}
                             </Tag>
                             <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                                {/* Always show staged count, dim if status ready */}
-                                <Tag color={rec.status === 'ready' ? 'default' : 'blue'}>
-                                  {rec.contributions.length} contributions staged
+                              <StagedContributionsCounter
+                                temple_ids={rec.temple_ids || []}
+                                groups={rec.groups || []}
+                              />
+                              {rec.status === 'ready' && (
+                                <Tag color="green">
+                                  {totalContribs} contributions grouped
                                 </Tag>
-
-                                {/* Show grouped only when ready */}
-                                {rec.status === 'ready' && (
-                                  <Tag color="green">
-                                    {totalContribs} contributions grouped
-                                  </Tag>
-                                )}
-
-                                <Tag color="orange">
-                                  {rec.groups.length} groups
-                                </Tag>
-                              </div>
-
+                              )}
+                              <Tag color="orange">
+                                {(rec.groups || []).length} groups
+                              </Tag>
+                            </div>
                           </div>
                         }
                       />
-
-                      <List.Item.Meta
-                        style={{ marginLeft: '20rem' }}
-                        description={
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            <Button
-                                type="link"
-                                icon={<CloudDownloadOutlined />}
-                                onClick={() => handleDownload(rec)}
-                                style={{ color: 'orange' }}
-                              >
-                                Download JSON
-                              </Button>
-                            <Button
-                              type="dashed"
-                              icon={<GroupOutlined />}
-                            onClick={() => {
-                                setActiveReconstruction(rec.reconstruction_id);
-                                setActiveTab('grouping');
-                              }}
-                            >
-                              Group
-                            </Button>
-
-                            <Popconfirm
-                              title="Yakin mau hapus?"
-                              onConfirm={() =>
-                                reconStore.removeReconstruction(
-                                  rec.reconstruction_id,
-                                  filterDate?.format("YYYYMM")!
-                                )
-                              }
-                              disabled={rec.status === "ready"} // langsung boolean
-                            >
-                              <Button
-                                type="link"
-                                icon={<DeleteOutlined />}
-                                danger
-                                disabled={rec.status === "ready"} // langsung boolean
-                              >
-                                Delete
-                              </Button>
-                            </Popconfirm>
-                          </div>
-                        }
-                      />
+                      <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                        <Button
+                          type="link"
+                          icon={<CloudDownloadOutlined />}
+                          onClick={() => handleDownload(rec)}
+                          style={{ color: 'orange' }}
+                        >
+                          Download JSON
+                        </Button>
+                        <Button
+                          type="dashed"
+                          icon={<GroupOutlined />}
+                          onClick={() => {
+                            setActiveReconstruction(rec.reconstruction_id);
+                            setActiveTab('grouping');
+                          }}
+                        >
+                          Group
+                        </Button>
+                        <Popconfirm
+                          title="Yakin mau hapus?"
+                          onConfirm={() =>
+                            reconStore.removeReconstruction(
+                              rec.reconstruction_id,
+                              filterDate?.format("YYYYMM")!
+                            )
+                          }
+                          disabled={rec.status === "ready"}
+                        >
+                          <Button
+                            type="link"
+                            icon={<DeleteOutlined />}
+                            danger
+                            disabled={rec.status === "ready"}
+                          >
+                            Delete
+                          </Button>
+                        </Popconfirm>
+                      </div>
                     </List.Item>
                   )
-                }
-                }
-              
+                }}
               />
-              ):(
-                <div style={{ padding: 48, textAlign: 'center' }}>
-                    <Empty
-                      image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      description={
-                        filterDate
-                          ? `No reconstructions on ${filterDate.format('MMM YYYY')}`
-                          : 'Please select a date first'
-                      }
-                    />
-                  </div>
-
-              )}
-        </TabPane>
-
-          {/* Tab 2: Group Management */}
+            ) : (
+              <div style={{ padding: 48, textAlign: 'center' }}>
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    filterDate ?
+                    `No reconstructions on ${filterDate.format('MMM YYYY')}` :
+                    'Please select a date first'
+                  }
+                />
+              </div>
+            )}
+          </TabPane>
           <TabPane tab="Group Management" key="grouping">
             {activeReconstruction ? (
               <GroupManagement
@@ -1058,11 +712,8 @@ const handleSave = async () => {
               </Card>
             )}
           </TabPane>
-
-          {/* Tab 3: Configuration */}
-        
-          <TabPane tab="Configuration" 
-            key="configuration" 
+          <TabPane tab="Configuration"
+            key="configuration"
             disabled={configDisabled}
           >
             <Typography.Title level={5}>Select a Config</Typography.Title>
@@ -1073,28 +724,20 @@ const handleSave = async () => {
                   placeholder="Select configuration key"
                   value={selectedKey}
                   onChange={setSelectedKey}
+                  loading={configs.length === 0}
                 >
                   {configs.map((c) => (
                     <Option key={c.key} value={c.key}>
-                       {c.value}
+                      {c.value}
                     </Option>
                   ))}
                 </Select>
               </Form.Item>
-
-              {/* <Form.Item label="Resolution">
-                <Input
-                  value={resolution}
-                  onChange={(e) => setResolution(e.target.value)}
-                  placeholder="Enter resolution"
-                />
-              </Form.Item> */}
-
               <Form.Item>
-                <Button 
-                  type="primary" 
-                  onClick={handleConfigSubmit} 
-                  style={{backgroundColor:"#772d2f"}}
+                <Button
+                  type="primary"
+                  onClick={handleConfigSubmit}
+                  style={{ backgroundColor: "#772d2f" }}
                 >
                   Submit
                 </Button>
@@ -1103,9 +746,7 @@ const handleSave = async () => {
           </TabPane>
         </Tabs>
       </div>
-
-      {/* Modal 1: Create Reconstruction - Temple Selection */}
-       <Modal
+      <Modal
         title="Create Reconstruction"
         open={createModalVisible}
         width={600}
@@ -1119,6 +760,7 @@ const handleSave = async () => {
             type="primary"
             disabled={selectedTempleIds.length === 0 || !label.trim()}
             onClick={handleSave}
+            loading={loadingTemples}
           >
             Create Reconstruction
           </Button>
@@ -1132,35 +774,33 @@ const handleSave = async () => {
               placeholder="Reconstruction label"
             />
           </Form.Item>
-
           <Form.Item label="Select Temples" >
             <Input.Search
-                placeholder="Search temples"
-                value={templeSearchText}
-                onChange={(e) => setTempleSearchText(e.target.value)}
-                onSearch={handleTempleSearch} // Tambahkan ini
-                enterButton
-                loading={loadingTemples}
-                style={{ marginBottom: 16 }}
-              />
-            
-            {loadingTemples ? (
+              placeholder="Search temples"
+              value={templeSearchText}
+              onChange={(e) => setTempleSearchText(e.target.value)}
+              onSearch={handleTempleSearch}
+              enterButton
+              loading={loadingTemples}
+              style={{ marginBottom: 16 }}
+            />
+            {loadingTemples && templeStore.temples.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 24 }}>
                 <Spin />
               </div>
             ) : templeStore.temples.length === 0 ? (
-              <div style={{ 
-                border: '1px solid #d9d9d9', 
-                borderRadius: 4, 
-                padding: 24, 
-                textAlign: 'center' 
+              <div style={{
+                border: '1px solid #d9d9d9',
+                borderRadius: 4,
+                padding: 24,
+                textAlign: 'center'
               }}>
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description={
-                    debouncedTempleSearchText 
-                      ? `No temples found for "${debouncedTempleSearchText}"` 
-                      : "No temples available"
+                    debouncedTempleSearchText ?
+                    `No temples found for "${debouncedTempleSearchText}"` :
+                    "No temples available"
                   }
                 />
               </div>
@@ -1170,21 +810,20 @@ const handleSave = async () => {
                   <List
                     dataSource={templeStore.temples}
                     renderItem={temple => (
-                      <List.Item 
+                      <List.Item
                         key={temple.md_temples_id}
                         onClick={() => handleTempleSelect(temple.md_temples_id)}
                         style={{
                           cursor: 'pointer',
                           padding: '8px 16px',
-                          backgroundColor: selectedTempleIds.includes(temple.md_temples_id) 
-                            ? '#e6f7ff' 
-                            : 'transparent',
+                          backgroundColor: selectedTempleIds.includes(temple.md_temples_id) ?
+                          '#e6f7ff' :
+                          'transparent',
                           borderBottom: '1px solid #f0f0f0'
                         }}
                       >
                         <Checkbox
                           checked={selectedTempleIds.includes(temple.md_temples_id)}
-                          onChange={() => handleTempleSelect(temple.md_temples_id)}
                           style={{ marginRight: 16 }}
                         />
                         <List.Item.Meta
@@ -1195,13 +834,11 @@ const handleSave = async () => {
                     )}
                   />
                 </div>
-                
-                {/* Pagination */}
-                <div style={{marginTop:12, display: 'flex', alignItems: 'center', gap: 12 , justifyContent:'space-between'}}>
+                <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
                   <Button
                     disabled={templePage === 1 || templeStore.loading}
                     loading={templeStore.loading}
-                    onClick={() => setTemplePage(p => p - 1)}
+                    onClick={() => setTemplePage(p => Math.max(1, p - 1))}
                   >
                     Previous
                   </Button>
@@ -1219,14 +856,8 @@ const handleSave = async () => {
           </Form.Item>
         </Form>
       </Modal>
-
-
-
-
-      
     </>
   );
 }
 
-
-export default Reconstruction
+export default Reconstruction;

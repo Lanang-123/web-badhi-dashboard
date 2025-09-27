@@ -115,3 +115,54 @@
   margin-left: 10px;
   font-weight: bold !important;
 }
+
+
+/* ====================================== */
+.tooltipCard {
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  border-radius: 8px;
+  overflow: hidden;
+  padding: 0;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  border: none;
+}
+
+.tooltipImage {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  background-color: #f0f0f0; /* Warna placeholder jika gambar tidak ada */
+}
+
+.tooltipContent {
+  padding: 12px;
+  background-color: #fff;
+}
+
+.tooltipTitle {
+  margin: 0 0 4px 0 !important;
+  color: #772d2f !important;
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  white-space: normal;
+}
+
+.tooltipLocation {
+  display: block;
+  margin-bottom: 8px !important;
+  font-size: 0.8rem !important;
+}
+
+.tooltipDescription {
+  font-size: 0.85rem !important;
+  color: #555;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3; /* Membatasi deskripsi menjadi 3 baris */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
