@@ -94,7 +94,8 @@ const useContributionStore = create<ContributionState>((set, get) => ({
         if (!data.is_next) break;
         page++;
       }
-
+      console.log(allContributions);
+      
       set({
         contributions: allContributions,
         count: allContributions.length,

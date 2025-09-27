@@ -9,14 +9,17 @@ import {
   Typography,
   Table,
   Input,
+  Spin,
 } from "antd";
 import { SearchOutlined, ExclamationCircleFilled } from "@ant-design/icons";
 import type { GetProps } from "antd";
 import { Link } from "react-router-dom";
 import ReactECharts from "echarts-for-react";
 
-import useChartContributionStore from "../../store/useChartContributionStore";
-import useTempleStore from "../../store/useTempleStore";
+// Impor store yang dibutuhkan
+import useTempleStore, { Pura } from "../../store/useTempleStore";
+import useContributionStore, { Contribution as ContributionType } from "../../store/useContributionStore"; 
+import useAuthStore from "../../store/useAuthStore";
 
 import styles from "./Contribution.module.css";
 
@@ -24,107 +27,188 @@ const { Title } = Typography;
 const { Search } = Input;
 type SearchProps = GetProps<typeof Input.Search>;
 
-// Struktur single row untuk AntD Table
+// Struktur data untuk tabel
 interface TableRow {
   key: number;
   md_temples_id: number;
   name: string;
   location: string;
   type: string;
-  quantity: number;
-  nista: number | string;
-  madya: number | string;
-  utama: number | string;
+}
+
+// Interface untuk data chart
+interface MonthlySummary {
+  labels: string[];
+  data: number[];
+}
+interface PieChartData {
+  name: string;
+  value: number;
 }
 
 export default function Contribution() {
-  // 1. State lokal untuk searchText, controlled pagination, dan data untuk table
+  // --- State Lokal Komponen ---
   const [searchText, setSearchText] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [tableData, setTableData] = useState<TableRow[]>([]);
+  
+  // State lokal untuk data chart
+  const [monthlySummary, setMonthlySummary] = useState<MonthlySummary>({ labels: [], data: [] });
+  const [topTemplesData, setTopTemplesData] = useState<PieChartData[]>([]);
+  const [topTemplesLoading, setTopTemplesLoading] = useState(true);
 
-  // 2. Ambil data & actions dari zustand stores
+  // State untuk perbaikan pagination
+  const [totalCount, setTotalCount] = useState(0);
+
+  // --- Ambil data dari Zustand Stores ---
   const {
-    temples,         // array Pura[] dari halaman currentPage
-    count,           // total semua temples (untuk pagination.total)
+    temples,
+    count,
     loading: templeLoading,
     fetchTemples,
   } = useTempleStore();
-  const {
-    monthlyData,
-    monthlyLabels,
-    contributorData,
-    contributorLabels,
-  } = useChartContributionStore();
 
-  // 3. Controlled fetch: setiap currentPage atau searchText berubah
+  const { 
+    contributions, 
+    loading: contributionLoading, 
+    fetchContributions 
+  } = useContributionStore();
+
+  const token = useAuthStore((state) => state.token);
+  const apiUrl = import.meta.env.VITE_API_URL;
+
+  // --- Side Effects (useEffect) ---
+
+  // 1. Fetch data untuk tabel (tidak berubah)
   useEffect(() => {
-    // memanggil API page currentPage + filter searchText
     fetchTemples(currentPage, searchText);
   }, [currentPage, searchText, fetchTemples]);
 
-    // Handler ganti halaman: simpan page, fetch dengan searchText terkini
+  // 2. Fetch data kontribusi untuk chart bulanan (tidak berubah)
+  useEffect(() => {
+    fetchContributions();
+  }, [fetchContributions]);
+
+  // 3. PERBAIKAN TOTAL: Ambil SEMUA data Pura secara BERURUTAN halaman per halaman
+  useEffect(() => {
+    const fetchAllTemplesSequentially = async () => {
+      if (!token) {
+        setTopTemplesLoading(false);
+        return;
+      }
+
+      setTopTemplesLoading(true);
+      try {
+        const allTemples: Pura[] = [];
+        let page = 1;
+        let hasMorePages = true;
+
+        // Terus panggil API selama 'is_next' bernilai true
+        while (hasMorePages) {
+          const response = await fetch(`${apiUrl}/private/temples?page=${page}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (!response.ok) {
+            hasMorePages = false; // Hentikan loop jika ada error
+            throw new Error(`Gagal mengambil data Pura di halaman ${page}`);
+          }
+
+          const data = await response.json();
+          if (data.datas && data.datas.length > 0) {
+            allTemples.push(...data.datas);
+          }
+          
+          // Kondisi berhenti: jika API bilang tidak ada halaman selanjutnya
+          hasMorePages = data.is_next || false;
+          page++;
+        }
+
+        // Setelah semua data terkumpul, saring dan urutkan
+        const top5Temples = allTemples
+          // LANGKAH PENTING: Saring dulu Pura yang memiliki kontribusi > 0
+          .filter(temple => temple.total_contributions > 0)
+          .sort((a, b) => b.total_contributions - a.total_contributions)
+          .slice(0, 5)
+          .map(temple => ({
+            name: temple.name,
+            value: temple.total_contributions,
+          }));
+        
+        setTopTemplesData(top5Temples);
+
+      } catch (error) {
+        console.error("Gagal mengambil dan memproses semua data Pura:", error);
+        setTopTemplesData([]);
+      } finally {
+        setTopTemplesLoading(false);
+      }
+    };
+
+    fetchAllTemplesSequentially();
+  }, [token, apiUrl]);
+
+
+  // 4. Proses data kontribusi untuk chart bulanan (tidak berubah)
+  useEffect(() => {
+    if (contributions && contributions.length > 0) {
+      const monthlyCounts: { [key: string]: number } = {};
+      contributions.forEach((c: ContributionType) => {
+        const date = new Date(c.created_at);
+        const monthYear = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+        monthlyCounts[monthYear] = (monthlyCounts[monthYear] || 0) + 1;
+      });
+      const sortedMonths = Object.keys(monthlyCounts).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      setMonthlySummary({
+        labels: sortedMonths,
+        data: sortedMonths.map(month => monthlyCounts[month])
+      });
+    }
+  }, [contributions]);
+
+  // 5. & 6. Logika untuk pagination dan tabel (tidak berubah)
+  useEffect(() => {
+    if (currentPage === 1 || count > totalCount) {
+      setTotalCount(count);
+    }
+  }, [count, currentPage, totalCount]);
+  
+  useEffect(() => {
+    const rows: TableRow[] = temples.map((t) => ({
+      key: t.md_temples_id,
+      md_temples_id: t.md_temples_id,
+      name: t.name,
+      location: t.location_name,
+      type: t.temple_type === "Pura Agung" ? "Pura Agung" : "Pura Pribadi",
+    }));
+    setTableData(rows);
+  }, [temples]);
+
+
+  // --- Handlers ---
   const onPageChange = (page: number) => {
     setCurrentPage(page);
-    fetchTemples(page, searchText);
   };
 
-  // 4. Bangun tableData setiap kali temples berubah atau searchText berubah
-  useEffect(() => {
-    const rows: TableRow[] = temples
-      .map((t) => {
-        // Tentukan tipe Pura: “Pura Agung” atau “Pura Pribadi”
-        const type = t.temple_type === "Pura Agung" ? "Pura Agung" : "Pura Pribadi";
-        const isAgung = type === "Pura Agung";
-
-        return {
-          key: t.md_temples_id,
-          md_temples_id: t.md_temples_id,
-          name: t.name,
-          location: t.location_name,
-          type,
-          quantity: t.total_contributions,
-          // contoh data acak untuk nista/madya/utama hanya kalau Pura Agung
-          nista: isAgung ? Math.floor(Math.random() * 10) + 1 : "-",
-          madya: isAgung ? Math.floor(Math.random() * 15) + 1 : "-",
-          utama: isAgung ? Math.floor(Math.random() * 10) + 1 : "-",
-        };
-      })
-      // Filter lagi di client (optional; searchText juga dikirim ke backend)
-      .filter((row) => {
-        const q = searchText.toLowerCase();
-        return (
-          row.name.toLowerCase().includes(q) ||
-          row.location.toLowerCase().includes(q)
-        );
-      });
-
-    setTableData(rows);
-  }, [temples, searchText]);
-
-  // 5. Handler untuk Search input
   const onSearch: SearchProps["onSearch"] = (value) => {
     setSearchText(value);
-    setCurrentPage(1);  // reset ke halaman 1 saat ada search baru
+    setCurrentPage(1);
   };
 
-  // 6. Definisi opsi chart (tidak berubah dari implementasi-mu)
+  // --- Konfigurasi Chart & Tabel ---
   const barOptions = {
     title: { text: "Progress per Month", left: "center" },
-    xAxis: { type: "category", data: monthlyLabels },
+    xAxis: { type: "category", data: monthlySummary.labels },
     yAxis: { type: "value" },
-    series: [{ data: monthlyData, type: "bar" }],
+    series: [{ data: monthlySummary.data, type: "bar", color: '#772d2f' }],
     grid: { top: 50, right: 20, bottom: 30, left: 40 },
+    tooltip: { trigger: 'axis' }
   };
-  const contributorPieData = contributorLabels.map((l, i) => ({
-    name: l,
-    value: contributorData[i],
-  }));
   const pieOptions = {
-    title: { text: "Top 5 Contributor Data", left: "center" },
-    tooltip: { trigger: "item" },
+    title: { text: "Top 5 Temples by Contribution", left: "center" },
+    tooltip: { trigger: "item", formatter: "{a} <br/>{b} : {c} ({d}%)" },
     legend: { orient: "horizontal", bottom: 0 },
-    series: [{ name: "Contributor", type: "pie", radius: "50%", data: contributorPieData }],
+    series: [{ name: "Contributions", type: "pie", radius: "50%", data: topTemplesData }],
   };
   const videoApprovalOptions = {
     title: { text: "Video Approval", left: "center", top: 0 },
@@ -139,78 +223,16 @@ export default function Contribution() {
     grid: { top: 70, right: 20, bottom: 30, left: 40 },
   };
 
-  // 7. Kolom untuk AntD Table
   const columns = [
     { title: "Nama Pura", dataIndex: "name", key: "name" },
-    {
-      title: "Lokasi",
-      dataIndex: "location",
-      key: "location",
-      filters: [
-        { text: "Karangasem", value: "Karangasem" },
-        { text: "Gianyar", value: "Gianyar" },
-        { text: "Tabanan", value: "Tabanan" },
-      ],
-      onFilter: (value: any, record: TableRow) =>
-        record.location.includes(value),
-    },
-    {
-      title: "Tipe",
-      dataIndex: "type",
-      key: "type",
-      filters: [
-        { text: "Pura Agung", value: "Pura Agung" },
-        { text: "Pura Pribadi", value: "Pura Pribadi" },
-      ],
-      onFilter: (value: any, record: TableRow) =>
-        record.type.includes(value),
-    },
-    {
-      title: "Quantity",
-      dataIndex: "quantity",
-      key: "quantity",
-      sorter: (a: TableRow, b: TableRow) => a.quantity - b.quantity,
-    },
-    {
-      title: "Nista",
-      dataIndex: "nista",
-      key: "nista",
-      render: (val: number | string, record: TableRow) =>
-        val !== "-"
-          ? <Link to={`/temples/detail/${record.md_temples_id}`}>{val}</Link>
-          : "-",
-    },
-    {
-      title: "Madya",
-      dataIndex: "madya",
-      key: "madya",
-      render: (val: number | string, record: TableRow) =>
-        val !== "-"
-          ? <Link to={`/temples/detail/${record.md_temples_id}`}>{val}</Link>
-          : "-",
-    },
-    {
-      title: "Utama",
-      dataIndex: "utama",
-      key: "utama",
-      render: (val: number | string, record: TableRow) =>
-        val !== "-"
-          ? <Link to={`/temples/detail/${record.md_temples_id}`}>{val}</Link>
-          : "-",
-    },
+    { title: "Lokasi", dataIndex: "location", key: "location" },
+    { title: "Tipe", dataIndex: "type", key: "type" },
     {
       title: "Detail",
       key: "detail",
       render: (_: any, record: TableRow) => (
         <Link to={`/temples/detail/${record.md_temples_id}`}>
-          <ExclamationCircleFilled
-            style={{
-              color: "#afafaf",
-              fontSize: 20,
-              cursor: "pointer",
-              marginTop: 5,
-            }}
-          />
+          <ExclamationCircleFilled style={{ color: "#afafaf", fontSize: 20 }} />
         </Link>
       ),
     },
@@ -224,16 +246,16 @@ export default function Contribution() {
           <Title level={5} className={styles.sectionSubtitle}>You can see the latest data</Title>
         </Col>
       </Row>
-      {/* Chart section */}
+      
       <Row gutter={[16, 16]}>
         <Col xs={24} md={8}>
           <Card title="Progress per Month">
-            <ReactECharts option={barOptions} style={{ height: 300 }} />
+            {contributionLoading ? <div style={{height: 300, display: 'flex', justifyContent: 'center', alignItems: 'center'}}><Spin /></div> : <ReactECharts option={barOptions} style={{ height: 300 }} />}
           </Card>
         </Col>
         <Col xs={24} md={8}>
-          <Card title="Top 5 Contributor Data">
-            <ReactECharts option={pieOptions} style={{ height: 300 }} />
+          <Card title="Top 5 Temples by Contribution">
+            {topTemplesLoading ? <div style={{height: 300, display: 'flex', justifyContent: 'center', alignItems: 'center'}}><Spin /></div> : <ReactECharts option={pieOptions} style={{ height: 300 }} />}
           </Card>
         </Col>
         <Col xs={24} md={8}>
@@ -243,7 +265,6 @@ export default function Contribution() {
         </Col>
       </Row>
 
-      {/* Table section */}
       <Row style={{ marginTop: 32 }}>
         <Col span={24}>
           <Card>
@@ -264,10 +285,10 @@ export default function Contribution() {
               dataSource={tableData}
               loading={templeLoading}
               pagination={{
-                current: currentPage,   // controlled page
+                current: currentPage,
                 pageSize: 10,
-                total: count,           // total semua temples
-                onChange: onPageChange, // manual handler
+                total: totalCount, 
+                onChange: onPageChange,
               }}
             />
           </Card>

@@ -1,3 +1,5 @@
+// src/components/ContributionDetailCard/ContributionDetailCard.tsx
+
 import { useState } from "react";
 import {
   Card,
@@ -49,12 +51,13 @@ export default function ContributionDetailCard({ data, reconstructionId }: Props
   const reconstructionStore = useReconstructionStore();
 
   const contributionData = {
-  contribution_id: data.tx_contribution_id,
-  contribution_name: data.name,
-  share_link: data.file_path,
-  privacy_setting: data.license_type === 1 ? "public" : "private",
-  temple_name: data.level_area ?? "Unknown Temple", // <-- tambah ini
-};
+    contribution_id: data.tx_contribution_id,
+    contribution_name: data.name,
+    share_link: data.file_path,
+    privacy_setting: data.license_type === 1 ? "public" : "private",
+    temple_name: data.level_area ?? "Unknown Temple",
+    user_id: data.user_id, // <-- PERBAIKAN DITERAPKAN DI SINI
+  };
 
   const selected = reconstructionId
     ? reconstructionStore.getSelectedContributions(reconstructionId)
@@ -65,13 +68,11 @@ export default function ContributionDetailCard({ data, reconstructionId }: Props
   );
 
   const handleToggle = () => {
-  if (reconstructionId) {
-    
-    reconstructionStore.toggleContribution(reconstructionId, contributionData);
+    if (reconstructionId) {
+      // Sekarang tidak akan ada error lagi karena contributionData sudah lengkap
+      reconstructionStore.toggleContribution(reconstructionId, contributionData);
     };
-    
   }
-
 
   // Format tanggal
   const createdDate = new Date(data.created_at).toLocaleDateString("en-US", {
@@ -92,7 +93,6 @@ export default function ContributionDetailCard({ data, reconstructionId }: Props
           overflow: "hidden",
           position: "relative",
           border: isSelected ? "2px solid #772d2f" : "none"
-          
         }}
         cover={
           <>
@@ -105,7 +105,6 @@ export default function ContributionDetailCard({ data, reconstructionId }: Props
                 maxHeight: 200,
               }}
             />
-            {/* Tambahkan checkbox di pojok kanan atas */}
             {reconstructionId && (
                 <div className={styles.checkboxWrapper}>
                   <Checkbox 
@@ -126,7 +125,6 @@ export default function ContributionDetailCard({ data, reconstructionId }: Props
           </>
         }
         actions={[
-          // Bungkus ikon dalam <div> agar onClick selalu ter-capture
           <div
             key="like"
             className={styles.actionIconDetail}
@@ -170,7 +168,6 @@ export default function ContributionDetailCard({ data, reconstructionId }: Props
 
         <Text
           style={{ display: "block", marginTop: 16 }}
-         
         >
           {data.description}
         </Text>
@@ -180,7 +177,6 @@ export default function ContributionDetailCard({ data, reconstructionId }: Props
         </Row>
       </Card>
 
-      {/* Modal Rating */}
       <VideoRatingModal
         isVisible={isModalVisible}
         onClose={() => setIsModalVisible(false)}
