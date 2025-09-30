@@ -37,6 +37,7 @@
     "sweetalert2": "^11.21.0",
     "three": "^0.177.0",
     "turf": "^3.0.14",
+    "uuid": "^13.0.0",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
@@ -44,6 +45,7 @@
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@types/react-window": "^1.8.8",
+    "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^9.21.0",
     "eslint-plugin-react-hooks": "^5.0.0",

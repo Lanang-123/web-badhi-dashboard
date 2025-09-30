@@ -350,6 +350,8 @@ const useReconstructionStore = create<ReconstructionState>()(
                     signal: signal
                 }
             );
+            console.log(response.data);
+            
             if (response.status !== 200 && response.status !== 201) {
                 throw new Error(`Server error: ${response.status}`);
             }

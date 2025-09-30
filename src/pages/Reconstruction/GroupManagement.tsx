@@ -1,6 +1,7 @@
 // src/pages/GroupManagement.tsx
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid'; // Import UUID
 import {
   Card,
   Button,
@@ -77,12 +78,6 @@ interface Contribution {
   groupName?: string;
   user_id: number;
 }
-
-// interface AuxData {
-//   temple_id?: number;
-//   name: string[];
-//   avatar: string[];
-// }
 
 interface FilterState {
   category: string[];
@@ -480,7 +475,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
   const [files, setFiles] = useState<FileUploadState>({});
-  const [modelId, setModelId] = useState<string>('');
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const [mergeableModels, setMergeableModels] = useState<MergeableModelInfo[]>([]);
@@ -867,7 +861,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
     setCurrentGroupId(groupId);
     setUploadModalVisible(true);
     setFiles({});
-    setModelId('');
   };
   
   const handleCancelAndAbortUpload = () => {
@@ -880,17 +873,15 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
   };
 
   const handleUploadFiles = async () => {
-    if (!modelId.trim()) {
-      message.error('Model ID harus diisi');
-      return;
-    }
     abortControllerRef.current = new AbortController();
     const dateParam = new Date().toISOString().slice(0, 7).replace('-', '');
+    const newModelId = uuidv4(); // Generate UUID here
+
     try {
       if (!recon || !currentGroupId) throw new Error('Data rekonstruksi atau grup tidak ditemukan');
-      const success = await uploadGroupModel(recon.reconstruction_id, currentGroupId, modelId.trim(), files, dateParam, abortControllerRef.current.signal);
+      const success = await uploadGroupModel(recon.reconstruction_id, currentGroupId, newModelId, files, dateParam, abortControllerRef.current.signal);
       if (success) {
-        notification.success({ message: 'Unggah Berhasil', description: `Model "${modelId}" telah berhasil diunggah.` });
+        notification.success({ message: 'Unggah Berhasil', description: `Model dengan ID "${newModelId}" telah berhasil diunggah.` });
         setUploadModalVisible(false);
       }
     } catch (err: any) {
@@ -911,7 +902,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
 
   return (
     <div className={styles.container}>
-      {/* ... (Header, New Group Card, dan layout Row tidak berubah) ... */}
       <div className={styles.header}>
         <Title level={3} style={{ margin: 0 }}>Group Management</Title>
         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
@@ -1027,7 +1017,6 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
         bodyStyle={{ padding: 'clamp(16px, 3vw, 32px)', background: 'linear-gradient(135deg, #fffafa, #f2e8e9)', borderRadius: 12 }}
         footer={[ <Button key="cancel" onClick={handleCancelAndAbortUpload}> Batal & Hentikan </Button>, <Button key="dismiss" onClick={handleDismissToBackground}> Sembunyikan </Button>, <Button key="submit" type="primary" loading={isUploading} onClick={handleUploadFiles} disabled={isUploading} style={{ backgroundColor: '#772d2f', borderColor: '#772d2f' }}> {isUploading ? 'Sedang Mengunggah...' : 'Unggah'} </Button>, ]}
       >
-        <div style={{ marginBottom: 24 }}> <Text strong style={{ display: 'block', marginBottom: 8, color: '#772d2f' }}> Model ID </Text> <Input placeholder="Masukkan Model ID" value={modelId} onChange={e => setModelId(e.target.value)} style={{ borderColor: '#772d2f', borderRadius: 8 }} disabled={isUploading} /> </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24, alignItems: 'stretch' }}>
           <div style={{ gridColumn: '1 / -1', backgroundColor: '#f9e8e9', padding: 16, borderRadius: 8, boxShadow: '0 2px 6px rgba(119, 45, 47, 0.15)' }}> <Text strong style={{ display: 'block', marginBottom: 8, color: '#772d2f' }}> Model Files (multiple) </Text> <Upload {...uploadProps} multiple fileList={files.model_files} disabled={isUploading} onChange={({ fileList }) => setFiles(prev => ({ ...prev, model_files: fileList }))} itemRender={(originNode, _file) => (<div style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}> {originNode} </div>)} > <Button icon={<UploadOutlined />} type="primary" style={{ backgroundColor: '#772d2f', borderColor: '#772d2f' }} block disabled={isUploading}> Select Model Files </Button> </Upload> </div>
           {[ { key: 'log', title: 'Log File', color: '#a03e3f', bgColor: '#faecec' }, { key: 'eval', title: 'Eval File', color: '#8f3536', bgColor: '#fcebea' }, { key: 'nerfstudio_data', title: 'Nerfstudio Data', color: '#7d2e2f', bgColor: '#fcebea' }, { key: 'nerfstudio_model', title: 'Nerfstudio Model', color: '#6b292a', bgColor: '#fbeaea' } ].map(item => { const uploadKey = item.key as keyof FileUploadState; const fileValue = files[uploadKey]; const fileList = fileValue ? [fileValue] : []; return ( <div key={uploadKey} style={{ backgroundColor: item.bgColor, padding: 16, borderRadius: 8, boxShadow: '0 2px 6px rgba(119, 45, 47, 0.10)', minWidth: 0 }}> <Text strong style={{ display: 'block', marginBottom: 8, color: item.color, fontSize: 'clamp(14px, 1.5vw, 16px)' }}> {item.title} </Text> <Upload {...uploadProps} fileList={fileList as UploadFile[]} disabled={isUploading} onChange={({ fileList }) => { setFiles(prev => ({ ...prev, [uploadKey]: fileList.length > 0 ? fileList[0] : undefined })); }} itemRender={(originNode, _file) => ( <div style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}> {originNode} </div>)} > <Button icon={<UploadOutlined />} style={{ color: '#772d2f', borderColor: '#dba3a5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} block disabled={isUploading}> Select {uploadKey.replace('_', ' ')} </Button> </Upload> </div> ); })}
@@ -1073,24 +1062,16 @@ const GroupManagement: React.FC<GroupManagementProps> = ({
               }}
             >
               {mergeableModels.map((info, index) => {
-                // ==========================================================
-                // ▼▼▼ PERBAIKAN FINAL PADA LOGIKA LABEL DROPDOWN ▼▼▼
-                // ==========================================================
                 let label = '';
                 const modelId = (info.model && typeof info.model === 'object' && info.model.model_id) 
                                 ? info.model.model_id 
                                 : null;
 
                 if (modelId) {
-                  // Jika ada model ID, tampilkan ID tersebut
                   label = `Model ID: "${modelId}" (from: ${info.groupName})`;
                 } else {
-                  // Jika tidak ada model ID, gunakan keterangan yang lebih jelas
                   label = `Model (Not available model) - (from: ${info.groupName})`;
                 }
-                // ==========================================================
-                // ▲▲▲ AKHIR DARI PERBAIKAN ▲▲▲
-                // ==========================================================
                 return (
                   <Option key={index} value={index}>
                     {label}
